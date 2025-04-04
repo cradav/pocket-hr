@@ -133,6 +133,26 @@ export function useAuth() {
     return { error };
   };
 
+  const resetPassword = async (email: string) => {
+    if (!supabase) {
+      return { error: new Error("Supabase client not initialized") };
+    }
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      return { error };
+    } catch (err) {
+      console.error("Error during password reset:", err);
+      return {
+        error:
+          err instanceof Error
+            ? err
+            : new Error("Unknown error during password reset"),
+      };
+    }
+  };
+
   return {
     user,
     session,
@@ -142,6 +162,7 @@ export function useAuth() {
     signInWithGoogle,
     signInWithLinkedIn,
     signOut,
+    resetPassword,
   };
 }
 

@@ -50,8 +50,15 @@ export default function AuthForm() {
   const [activeTab, setActiveTab] = useState<"login" | "register">("login");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
   const navigate = useNavigate();
-  const { signIn, signUp, signInWithGoogle, signInWithLinkedIn } = useAuth();
+  const {
+    signIn,
+    signUp,
+    signInWithGoogle,
+    signInWithLinkedIn,
+    resetPassword,
+  } = useAuth();
 
   const loginForm = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -71,6 +78,33 @@ export default function AuthForm() {
       title: "",
     },
   });
+
+  const handleForgotPassword = async () => {
+    const email = loginForm.getValues("email");
+    if (!email) {
+      setError("Please enter your email address first");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const { error } = await resetPassword(email);
+
+      if (error) {
+        setError(error.message);
+        return;
+      }
+
+      setResetEmailSent(true);
+    } catch (err) {
+      setError("An unexpected error occurred. Please try again.");
+      console.error("Unexpected error during password reset:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const onLoginSubmit = async (values: LoginFormValues) => {
     setIsLoading(true);
@@ -204,6 +238,12 @@ export default function AuthForm() {
                   <div className="text-sm text-destructive">{error}</div>
                 )}
 
+                {resetEmailSent && (
+                  <div className="text-sm text-green-600">
+                    Password reset email sent. Please check your inbox.
+                  </div>
+                )}
+
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? "Signing in..." : "Sign In with Email"}
                 </Button>
@@ -243,6 +283,14 @@ export default function AuthForm() {
             </Form>
           </CardContent>
           <CardFooter className="flex flex-col space-y-2">
+            <div className="text-sm text-muted-foreground text-center">
+              <button
+                onClick={() => handleForgotPassword()}
+                className="text-primary hover:underline"
+              >
+                Forgot password?
+              </button>
+            </div>
             <div className="text-sm text-muted-foreground text-center">
               Don't have an account?{" "}
               <button

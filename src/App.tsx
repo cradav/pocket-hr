@@ -17,7 +17,13 @@ const AdminPlans = lazy(() => import("./pages/admin/Plans"));
 const AdminAIAssistant = lazy(() => import("./pages/admin/AIAssistant"));
 
 // Protected route component
+// TEMPORARY: Authentication bypass for development
 const ProtectedRoute = ({ children, requiresAdmin = false }) => {
+  // Bypass all authentication checks and always render children
+  console.log("⚠️ DEVELOPMENT MODE: Authentication bypassed for admin access");
+  return children;
+
+  /* Original authentication logic (commented out for now)
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -52,6 +58,7 @@ const ProtectedRoute = ({ children, requiresAdmin = false }) => {
   }
 
   return children;
+  */
 };
 
 function App() {
