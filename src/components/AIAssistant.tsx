@@ -83,6 +83,8 @@ interface VoiceResponse {
   };
 }
 
+import { supabase } from "@/lib/supabase";
+
 const AIAssistant: React.FC<AIAssistantProps> = ({
   onRequestHumanSupport = () => {},
   wordCredits = { remaining: 1000, total: 1000 },
@@ -94,6 +96,17 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
   const [stagesWithConversations, setStagesWithConversations] = useState(
     initializeCareerStages,
   );
+  const [user, setUser] = useState<any>(null);
+
+  // Get current user
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      setUser(data.user);
+    };
+
+    getCurrentUser();
+  }, []);
   const [activeConversation, setActiveConversation] =
     useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([
@@ -133,7 +146,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
   const [isMobileFullscreen, setIsMobileFullscreen] = useState(false);
   const chatMainAreaRef = useRef<HTMLDivElement>(null);
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputValue.trim() || isRecording || isProcessingVoice) return;
 
     // Add user message
@@ -151,7 +164,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
 
     // If no active conversation, create one
     if (!activeConversation) {
-      createNewConversation(selectedAssistant);
+      await createNewConversation(selectedAssistant);
       return;
     }
 
@@ -185,9 +198,78 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
               }
             }
 
+            // Save the message to Supabase first
+            try {
+              // Check if we need to create a conversation in the database
+              if (
+                activeConversation &&
+                !activeConversation.id.includes("temp-")
+              ) {
+                // Add user message to existing conversation
+                await supabase.from("messages").insert({
+                  conversation_id: activeConversation.id,
+                  content: inputValue,
+                  sender: "user",
+                  created_at: new Date().toISOString(),
+                });
+
+                // Update conversation last_updated timestamp
+                await supabase
+                  .from("conversations")
+                  .update({ last_updated: new Date().toISOString() })
+                  .eq("id", activeConversation.id);
+              } else {
+                // Create a new conversation in the database
+                const { data: newConversation, error: convError } =
+                  await supabase
+                    .from("conversations")
+                    .insert({
+                      title: `New Conversation ${Date.now()}`,
+                      assistant_id: selectedAssistant,
+                      user_id: user?.id || "anonymous",
+                      last_updated: new Date().toISOString(),
+                    })
+                    .select()
+                    .single();
+
+                if (convError) throw convError;
+
+                // Add user message to the new conversation
+                await supabase.from("messages").insert({
+                  conversation_id: newConversation.id,
+                  content: inputValue,
+                  sender: "user",
+                  created_at: new Date().toISOString(),
+                });
+
+                // Update the active conversation with the database ID
+                if (activeConversation) {
+                  const updatedStages = [...stagesWithConversations];
+                  for (const stage of updatedStages) {
+                    for (const assistant of stage.assistants) {
+                      if (assistant.id === selectedAssistant) {
+                        const convIndex = assistant.conversations.findIndex(
+                          (conv) => conv.id === activeConversation.id,
+                        );
+
+                        if (convIndex >= 0) {
+                          assistant.conversations[convIndex].id =
+                            newConversation.id;
+                        }
+                      }
+                    }
+                  }
+                  setStagesWithConversations(updatedStages);
+                }
+              }
+            } catch (dbError) {
+              console.error("Error saving message to database:", dbError);
+              // Continue with OpenAI call even if database save fails
+            }
+
             // Call OpenAI service
             generateOpenAIResponse(inputValue, assistantMode)
-              .then((response) => {
+              .then(async (response) => {
                 const aiResponse: Message = {
                   id: (Date.now() + 1).toString(),
                   content: response.content,
@@ -200,10 +282,55 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                   // Rough estimate: 1 token ≈ 0.75 words
                   const wordsUsed = Math.ceil(response.tokenCount * 0.75);
                   onWordUsage(wordsUsed);
+
+                  // Update word credits in the database
+                  try {
+                    if (user) {
+                      const { data: userData } = await supabase
+                        .from("users")
+                        .select("word_credits_remaining")
+                        .eq("id", user.id)
+                        .single();
+
+                      if (userData) {
+                        const newRemaining = Math.max(
+                          0,
+                          userData.word_credits_remaining - wordsUsed,
+                        );
+                        await supabase
+                          .from("users")
+                          .update({ word_credits_remaining: newRemaining })
+                          .eq("id", user.id);
+                      }
+                    }
+                  } catch (creditError) {
+                    console.error("Error updating word credits:", creditError);
+                  }
                 }
 
                 const finalMessages = [...updatedMessages, aiResponse];
                 setMessages(finalMessages);
+
+                // Save AI response to database
+                try {
+                  if (
+                    activeConversation &&
+                    !activeConversation.id.includes("temp-")
+                  ) {
+                    await supabase.from("messages").insert({
+                      conversation_id: activeConversation.id,
+                      content: response.content,
+                      sender: "ai",
+                      created_at: new Date().toISOString(),
+                      token_count: response.tokenCount,
+                    });
+                  }
+                } catch (dbError) {
+                  console.error(
+                    "Error saving AI response to database:",
+                    dbError,
+                  );
+                }
 
                 // Update conversation in state
                 const finalStages = [...stagesWithConversations];
@@ -554,7 +681,63 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
     }
   };
 
-  const createNewConversation = (assistantId: string) => {
+  // Fetch conversations from database
+  useEffect(() => {
+    const fetchConversations = async () => {
+      if (!user || !selectedAssistant) return;
+
+      try {
+        const { data, error } = await supabase
+          .from("conversations")
+          .select(
+            `
+            id,
+            title,
+            last_updated,
+            messages:messages(id, content, sender, created_at)
+          `,
+          )
+          .eq("user_id", user.id)
+          .eq("assistant_id", selectedAssistant)
+          .order("last_updated", { ascending: false });
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          // Transform data to match Conversation interface
+          const conversations: Conversation[] = data.map((conv: any) => ({
+            id: conv.id,
+            title: conv.title,
+            lastUpdated: new Date(conv.last_updated),
+            messages: conv.messages.map((msg: any) => ({
+              id: msg.id,
+              content: msg.content,
+              sender: msg.sender as "user" | "ai",
+              timestamp: new Date(msg.created_at),
+            })),
+          }));
+
+          // Update the stagesWithConversations state
+          const updatedStages = [...stagesWithConversations];
+          for (const stage of updatedStages) {
+            for (const assistant of stage.assistants) {
+              if (assistant.id === selectedAssistant) {
+                assistant.conversations = conversations;
+              }
+            }
+          }
+
+          setStagesWithConversations(updatedStages);
+        }
+      } catch (err) {
+        console.error("Error fetching conversations:", err);
+      }
+    };
+
+    fetchConversations();
+  }, [user, selectedAssistant]);
+
+  const createNewConversation = async (assistantId: string) => {
     // Find the assistant
     let stageIndex = -1;
     let assistantIndex = -1;
@@ -663,7 +846,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
     setSearchResults([]);
   };
 
-  const handleRenameConversation = () => {
+  const handleRenameConversation = async () => {
     if (!conversationToRename || !newConversationName.trim()) return;
 
     const updatedStages = [...stagesWithConversations];
@@ -687,6 +870,18 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
             setActiveConversation(updatedConversation);
           }
 
+          // Update conversation title in database if it's a persisted conversation
+          if (!conversationToRename.id.includes("temp-")) {
+            try {
+              await supabase
+                .from("conversations")
+                .update({ title: newConversationName.trim() })
+                .eq("id", conversationToRename.id);
+            } catch (error) {
+              console.error("Error updating conversation title:", error);
+            }
+          }
+
           break;
         }
       }
@@ -698,7 +893,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
     setNewConversationName("");
   };
 
-  const handleDeleteConversation = (
+  const handleDeleteConversation = async (
     assistantId: string,
     conversationId: string,
   ) => {
@@ -719,7 +914,26 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
               deletedActiveConversation = true;
             }
 
-            // Remove the conversation
+            // Delete conversation from database if it's a persisted conversation
+            if (!conversationId.includes("temp-")) {
+              try {
+                // First delete all messages associated with this conversation
+                await supabase
+                  .from("messages")
+                  .delete()
+                  .eq("conversation_id", conversationId);
+
+                // Then delete the conversation itself
+                await supabase
+                  .from("conversations")
+                  .delete()
+                  .eq("id", conversationId);
+              } catch (error) {
+                console.error("Error deleting conversation:", error);
+              }
+            }
+
+            // Remove the conversation from state
             assistant.conversations.splice(conversationIndex, 1);
             break;
           }

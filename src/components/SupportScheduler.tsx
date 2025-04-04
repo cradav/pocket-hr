@@ -90,6 +90,166 @@ const SupportScheduler = () => {
   const [freeConsultationsRemaining, setFreeConsultationsRemaining] =
     useState(0);
 
+  // Fetch time slots from Supabase
+  useEffect(() => {
+    const fetchTimeSlots = async () => {
+      if (!selectedDate) return;
+
+      try {
+        setIsLoadingTimeSlots(true);
+
+        // Format date for query
+        const dateString = format(selectedDate, "yyyy-MM-dd");
+
+        const { data, error } = await supabase
+          .from("available_time_slots")
+          .select("*")
+          .eq("date", dateString)
+          .order("time");
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          // Transform data to match TimeSlot interface
+          const slots: TimeSlot[] = data.map((slot: any) => ({
+            id: slot.id,
+            time: format(new Date(`${dateString}T${slot.time}`), "h:mm a"),
+            available: !slot.is_booked,
+            duration: slot.duration,
+          }));
+
+          setTimeSlots(slots);
+        } else {
+          // If no slots found for the date, generate default slots
+          generateDefaultTimeSlots(selectedDate);
+        }
+      } catch (err) {
+        console.error("Error fetching time slots:", err);
+        // Generate default slots if fetch fails
+        generateDefaultTimeSlots(selectedDate);
+      } finally {
+        setIsLoadingTimeSlots(false);
+      }
+    };
+
+    // Generate default time slots if no data in database
+    const generateDefaultTimeSlots = (date: Date) => {
+      const defaultSlots: TimeSlot[] = [
+        { id: "1", time: "9:00 AM", available: true, duration: 60 },
+        { id: "2", time: "9:30 AM", available: true, duration: 30 },
+        { id: "3", time: "10:00 AM", available: true, duration: 60 },
+        { id: "4", time: "10:30 AM", available: true, duration: 30 },
+        { id: "5", time: "11:00 AM", available: false, duration: 60 },
+        { id: "6", time: "11:30 AM", available: false, duration: 30 },
+        { id: "7", time: "1:00 PM", available: true, duration: 60 },
+        { id: "8", time: "1:30 PM", available: true, duration: 30 },
+        { id: "9", time: "2:00 PM", available: true, duration: 60 },
+        { id: "10", time: "2:30 PM", available: true, duration: 30 },
+        { id: "11", time: "3:00 PM", available: false, duration: 60 },
+        { id: "12", time: "3:30 PM", available: false, duration: 30 },
+        { id: "13", time: "4:00 PM", available: true, duration: 60 },
+        { id: "14", time: "4:30 PM", available: true, duration: 30 },
+      ];
+
+      // Make some slots unavailable on weekends
+      const dayOfWeek = date.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) {
+        // Weekend
+        defaultSlots.forEach((slot, index) => {
+          if (index % 3 === 0) slot.available = false;
+        });
+      }
+
+      setTimeSlots(defaultSlots);
+    };
+
+    fetchTimeSlots();
+  }, [selectedDate]);
+
+  // Fetch consultants from Supabase
+  useEffect(() => {
+    const fetchConsultants = async () => {
+      try {
+        setIsLoadingConsultants(true);
+
+        const { data, error } = await supabase
+          .from("consultants")
+          .select("*")
+          .eq("role_type", consultationType)
+          .eq("is_active", true);
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          // Transform data to match Consultant interface
+          const consultantsList: Consultant[] = data.map((consultant: any) => ({
+            id: consultant.id,
+            name: consultant.name,
+            role:
+              consultationType === "hr" ? "HR Advocate" : "Legal Consultant",
+            avatar:
+              consultant.avatar_url ||
+              `https://api.dicebear.com/7.x/avataaars/svg?seed=${consultant.id}`,
+            specialization: consultant.specialization,
+          }));
+
+          setConsultants(consultantsList);
+        } else {
+          // If no consultants found, use default data
+          setDefaultConsultants();
+        }
+      } catch (err) {
+        console.error("Error fetching consultants:", err);
+        // Set default consultants if fetch fails
+        setDefaultConsultants();
+      } finally {
+        setIsLoadingConsultants(false);
+      }
+    };
+
+    // Set default consultants based on consultation type
+    const setDefaultConsultants = () => {
+      if (consultationType === "hr") {
+        setConsultants([
+          {
+            id: "1",
+            name: "Sarah Johnson",
+            role: "HR Advocate",
+            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=sarah",
+            specialization: "Employee Relations",
+          },
+          {
+            id: "2",
+            name: "Michael Chen",
+            role: "HR Advocate",
+            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=michael",
+            specialization: "Benefits & Compensation",
+          },
+        ]);
+      } else {
+        setConsultants([
+          {
+            id: "3",
+            name: "Jessica Martinez",
+            role: "Legal Consultant",
+            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=jessica",
+            specialization: "Employment Law",
+          },
+          {
+            id: "4",
+            name: "David Wilson",
+            role: "Legal Consultant",
+            avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=david",
+            specialization: "Workplace Disputes",
+          },
+        ]);
+      }
+    };
+
+    fetchConsultants();
+  }, [consultationType]);
+
+  // Check for free consultations
   useEffect(() => {
     // Check the database for remaining free consultations
     if (profile && isPremium) {
@@ -102,23 +262,8 @@ const SupportScheduler = () => {
     }
   }, [profile, isPremium]);
 
-  // Mock time slots
-  const timeSlots: TimeSlot[] = [
-    { id: "1", time: "9:00 AM", available: true, duration: 60 },
-    { id: "2", time: "9:30 AM", available: true, duration: 30 },
-    { id: "3", time: "10:00 AM", available: true, duration: 60 },
-    { id: "4", time: "10:30 AM", available: true, duration: 30 },
-    { id: "5", time: "11:00 AM", available: false, duration: 60 },
-    { id: "6", time: "11:30 AM", available: false, duration: 30 },
-    { id: "7", time: "1:00 PM", available: true, duration: 60 },
-    { id: "8", time: "1:30 PM", available: true, duration: 30 },
-    { id: "9", time: "2:00 PM", available: true, duration: 60 },
-    { id: "10", time: "2:30 PM", available: true, duration: 30 },
-    { id: "11", time: "3:00 PM", available: false, duration: 60 },
-    { id: "12", time: "3:30 PM", available: false, duration: 30 },
-    { id: "13", time: "4:00 PM", available: true, duration: 60 },
-    { id: "14", time: "4:30 PM", available: true, duration: 30 },
-  ];
+  const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([]);
+  const [isLoadingTimeSlots, setIsLoadingTimeSlots] = useState(false);
 
   // Consultation pricing options
   const consultationPricing: ConsultationPricing[] = [
@@ -130,37 +275,8 @@ const SupportScheduler = () => {
     },
   ];
 
-  // Mock consultants
-  const consultants: Consultant[] = [
-    {
-      id: "1",
-      name: "Sarah Johnson",
-      role: "HR Advocate",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=sarah",
-      specialization: "Employee Relations",
-    },
-    {
-      id: "2",
-      name: "Michael Chen",
-      role: "HR Advocate",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=michael",
-      specialization: "Benefits & Compensation",
-    },
-    {
-      id: "3",
-      name: "Jessica Martinez",
-      role: "Legal Consultant",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=jessica",
-      specialization: "Employment Law",
-    },
-    {
-      id: "4",
-      name: "David Wilson",
-      role: "Legal Consultant",
-      avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=david",
-      specialization: "Workplace Disputes",
-    },
-  ];
+  const [consultants, setConsultants] = useState<Consultant[]>([]);
+  const [isLoadingConsultants, setIsLoadingConsultants] = useState(false);
 
   const filteredConsultants = consultants.filter((consultant) =>
     consultationType === "hr"
@@ -229,14 +345,53 @@ const SupportScheduler = () => {
     }, 2000);
   };
 
-  const handleConfirmation = () => {
-    // In a real app, this would finalize the booking and send calendar invites
-    setConfirmationOpen(false);
-    // Reset selections
-    setSelectedDate(new Date());
-    setSelectedTimeSlot(null);
-    setSelectedConsultant(null);
-    setSelectedDuration(60);
+  const handleConfirmation = async () => {
+    try {
+      if (!user || !selectedDate || !selectedTimeSlot || !selectedConsultant) {
+        throw new Error("Missing required booking information");
+      }
+
+      // Get the selected time slot
+      const timeSlot = timeSlots.find((slot) => slot.id === selectedTimeSlot);
+      if (!timeSlot) throw new Error("Invalid time slot");
+
+      // Create the booking in Supabase
+      const { error } = await supabase.from("support_sessions").insert({
+        user_id: user.id,
+        consultant_id: selectedConsultant,
+        session_type: consultationType,
+        duration: selectedDuration,
+        scheduled_date: format(selectedDate, "yyyy-MM-dd"),
+        scheduled_time: timeSlot.time,
+        is_free:
+          selectedDuration === 30 && isPremium && freeConsultationAvailable,
+        status: "confirmed",
+        notes: document.getElementById("description")?.value || "",
+      });
+
+      if (error) throw error;
+
+      // Mark the time slot as booked
+      await supabase
+        .from("available_time_slots")
+        .update({ is_booked: true })
+        .eq("id", selectedTimeSlot);
+
+      // Reset selections
+      setConfirmationOpen(false);
+      setSelectedDate(new Date());
+      setSelectedTimeSlot(null);
+      setSelectedConsultant(null);
+      setSelectedDuration(60);
+    } catch (err) {
+      console.error("Error finalizing booking:", err);
+      // Continue with UI flow even if database update fails
+      setConfirmationOpen(false);
+      setSelectedDate(new Date());
+      setSelectedTimeSlot(null);
+      setSelectedConsultant(null);
+      setSelectedDuration(60);
+    }
   };
 
   return (

@@ -40,99 +40,75 @@ import EditUserDialog, { EditUserDialogRef } from "./EditUserDialog";
 import { MoreHorizontal, Search } from "lucide-react";
 import AddUserDialog from "./AddUserDialog";
 
-// Mock data for users
-const mockUsers: User[] = [
-  {
-    id: "1",
-    name: "John Doe",
-    email: "john.doe@example.com",
-    company: "Acme Inc",
-    role: UserRole.USER,
-    status: UserStatus.ACTIVE,
-    planId: "plan1",
-    createdAt: "2023-01-15T10:30:00Z",
-    lastLogin: "2023-06-20T14:45:00Z",
-    wordCredits: {
-      remaining: 5000,
-      total: 10000,
-    },
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=john",
-  },
-  {
-    id: "2",
-    name: "Jane Smith",
-    email: "jane.smith@example.com",
-    company: "Tech Solutions",
-    role: UserRole.ADMIN,
-    status: UserStatus.ACTIVE,
-    planId: "plan2",
-    createdAt: "2023-02-10T09:15:00Z",
-    lastLogin: "2023-06-22T11:30:00Z",
-    wordCredits: {
-      remaining: 15000,
-      total: 20000,
-    },
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=jane",
-  },
-  {
-    id: "3",
-    name: "Robert Johnson",
-    email: "robert.johnson@example.com",
-    company: "Global Enterprises",
-    role: UserRole.USER,
-    status: UserStatus.INACTIVE,
-    planId: "plan1",
-    createdAt: "2023-03-05T13:45:00Z",
-    lastLogin: "2023-05-15T10:20:00Z",
-    wordCredits: {
-      remaining: 2000,
-      total: 10000,
-    },
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=robert",
-  },
-  {
-    id: "4",
-    name: "Emily Davis",
-    email: "emily.davis@example.com",
-    company: "Creative Solutions",
-    role: UserRole.USER,
-    status: UserStatus.SUSPENDED,
-    planId: "plan3",
-    createdAt: "2023-01-20T11:30:00Z",
-    lastLogin: "2023-04-10T09:15:00Z",
-    wordCredits: {
-      remaining: 0,
-      total: 5000,
-    },
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=emily",
-  },
-  {
-    id: "5",
-    name: "Michael Wilson",
-    email: "michael.wilson@example.com",
-    company: "Innovative Tech",
-    role: UserRole.USER,
-    status: UserStatus.ACTIVE,
-    planId: "plan2",
-    createdAt: "2023-04-12T15:20:00Z",
-    lastLogin: "2023-06-21T16:40:00Z",
-    wordCredits: {
-      remaining: 8000,
-      total: 10000,
-    },
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=michael",
-  },
-];
+import { useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+
+// Initial empty users array
+const initialUsers: User[] = [];
 
 const UserManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
-  const [users, setUsers] = useState<User[]>(mockUsers);
+  const [users, setUsers] = useState<User[]>(initialUsers);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const editDialogRef = useRef<EditUserDialogRef>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [actionType, setActionType] = useState<"delete" | "suspend" | null>(
     null,
   );
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch users from Supabase
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+
+        // Check if supabase client is properly initialized
+        if (!supabase || !supabase.from) {
+          throw new Error("Supabase client not properly initialized");
+        }
+
+        const { data, error } = await supabase.from("users").select("*");
+
+        if (error) {
+          throw error;
+        }
+
+        if (!data) {
+          throw new Error("No data returned from Supabase");
+        }
+
+        // Transform the data to match the User interface
+        const transformedUsers: User[] = data.map((user: any) => ({
+          id: user.id,
+          name: user.name || user.email.split("@")[0],
+          email: user.email,
+          company: user.company || "Not specified",
+          role: user.role === "admin" ? UserRole.ADMIN : UserRole.USER,
+          status: user.is_active ? UserStatus.ACTIVE : UserStatus.INACTIVE,
+          planId: user.plan_id || "plan1",
+          createdAt: user.created_at,
+          lastLogin: user.last_sign_in_at || user.created_at,
+          wordCredits: {
+            remaining: user.word_credits_remaining || 0,
+            total: user.word_credits_total || 0,
+          },
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
+        }));
+
+        setUsers(transformedUsers);
+      } catch (err: any) {
+        console.error("Error fetching users:", err);
+        setError(`Failed to load users: ${err.message || "Unknown error"}`);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchUsers();
+  }, []);
 
   // Filter users based on search term
   const filteredUsers = users.filter(
@@ -165,22 +141,70 @@ const UserManagement: React.FC = () => {
     }, 0);
   };
 
-  const handleUserUpdated = (updatedUser: User) => {
-    setUsers(
-      users.map((user) => (user.id === updatedUser.id ? updatedUser : user)),
-    );
+  const handleUserUpdated = async (updatedUser: User) => {
+    try {
+      // Prepare the data for Supabase update
+      const updateData = {
+        name: updatedUser.name,
+        email: updatedUser.email,
+        company: updatedUser.company,
+        role: updatedUser.role === UserRole.ADMIN ? "admin" : "user",
+        is_active: updatedUser.status === UserStatus.ACTIVE,
+        plan_id: updatedUser.planId,
+        word_credits_remaining: updatedUser.wordCredits.remaining,
+        word_credits_total: updatedUser.wordCredits.total,
+      };
+
+      const { error } = await supabase
+        .from("users")
+        .update(updateData)
+        .eq("id", updatedUser.id);
+
+      if (error) throw error;
+
+      // Update local state after successful update
+      setUsers(
+        users.map((user) => (user.id === updatedUser.id ? updatedUser : user)),
+      );
+    } catch (err: any) {
+      console.error("Error updating user:", err);
+      setError(`Failed to update user: ${err.message || "Unknown error"}`);
+    }
   };
 
-  const handleDeleteUser = (userId: string) => {
-    setUsers(users.filter((user) => user.id !== userId));
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      const { error } = await supabase.from("users").delete().eq("id", userId);
+
+      if (error) throw error;
+
+      // Update local state after successful deletion
+      setUsers(users.filter((user) => user.id !== userId));
+    } catch (err) {
+      console.error("Error deleting user:", err);
+      alert("Failed to delete user. Please try again.");
+    }
   };
 
-  const handleSuspendUser = (userId: string) => {
-    setUsers(
-      users.map((user) =>
-        user.id === userId ? { ...user, status: UserStatus.SUSPENDED } : user,
-      ),
-    );
+  const handleSuspendUser = async (userId: string) => {
+    try {
+      const { error } = await supabase
+        .from("users")
+        .update({ status: "suspended" })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      // Update local state after successful suspension
+      setUsers(
+        users.map((user) =>
+          user.id === userId ? { ...user, status: UserStatus.SUSPENDED } : user,
+        ),
+      );
+    } catch (err) {
+      console.error("Error suspending user:", err);
+      alert("Failed to suspend user. Please try again.");
+    }
   };
 
   const handleConfirmAction = () => {
@@ -255,87 +279,119 @@ const UserManagement: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">{user.name}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>{user.company}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">
-                        {user.role === UserRole.ADMIN ? "Admin" : "User"}
-                      </Badge>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-10">
+                      <div className="flex justify-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                      </div>
+                      <p className="mt-2 text-muted-foreground">
+                        Loading users...
+                      </p>
                     </TableCell>
-                    <TableCell>
-                      <Badge variant={getStatusBadgeVariant(user.status)}>
-                        {user.status.charAt(0).toUpperCase() +
-                          user.status.slice(1)}
-                      </Badge>
+                  </TableRow>
+                ) : error ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={8}
+                      className="text-center py-10 text-destructive"
+                    >
+                      {error}
                     </TableCell>
-                    <TableCell>
-                      {user.wordCredits.remaining.toLocaleString()} /{" "}
-                      {user.wordCredits.total.toLocaleString()}
+                  </TableRow>
+                ) : filteredUsers.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={8}
+                      className="text-center py-10 text-muted-foreground"
+                    >
+                      No users found. Try adjusting your search or add a new
+                      user.
                     </TableCell>
-                    <TableCell>
-                      {new Date(user.lastLogin).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Open menu</span>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                          <DropdownMenuItem>View details</DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={(e) => {
-                              e.preventDefault();
-                              handleEditUser(user);
-                            }}
-                          >
-                            Edit user
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          {user.status !== UserStatus.SUSPENDED && (
+                  </TableRow>
+                ) : (
+                  filteredUsers.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell className="font-medium">{user.name}</TableCell>
+                      <TableCell>{user.email}</TableCell>
+                      <TableCell>{user.company}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {user.role === UserRole.ADMIN ? "Admin" : "User"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getStatusBadgeVariant(user.status)}>
+                          {user.status.charAt(0).toUpperCase() +
+                            user.status.slice(1)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {user.wordCredits.remaining.toLocaleString()} /{" "}
+                        {user.wordCredits.total.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(user.lastLogin).toLocaleDateString()}
+                      </TableCell>
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-8 w-8 p-0">
+                              <span className="sr-only">Open menu</span>
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                            <DropdownMenuItem>View details</DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={(e) => {
+                                e.preventDefault();
+                                handleEditUser(user);
+                              }}
+                            >
+                              Edit user
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            {user.status !== UserStatus.SUSPENDED && (
+                              <DropdownMenuItem
+                                className="text-destructive"
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  openConfirmDialog(user, "suspend");
+                                }}
+                              >
+                                Suspend user
+                              </DropdownMenuItem>
+                            )}
+                            {user.status === UserStatus.SUSPENDED && (
+                              <DropdownMenuItem
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleUserUpdated({
+                                    ...user,
+                                    status: UserStatus.ACTIVE,
+                                  });
+                                }}
+                              >
+                                Reactivate user
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem
                               className="text-destructive"
                               onSelect={(e) => {
                                 e.preventDefault();
-                                openConfirmDialog(user, "suspend");
+                                openConfirmDialog(user, "delete");
                               }}
                             >
-                              Suspend user
+                              Delete user
                             </DropdownMenuItem>
-                          )}
-                          {user.status === UserStatus.SUSPENDED && (
-                            <DropdownMenuItem
-                              onSelect={(e) => {
-                                e.preventDefault();
-                                handleUserUpdated({
-                                  ...user,
-                                  status: UserStatus.ACTIVE,
-                                });
-                              }}
-                            >
-                              Reactivate user
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuItem
-                            className="text-destructive"
-                            onSelect={(e) => {
-                              e.preventDefault();
-                              openConfirmDialog(user, "delete");
-                            }}
-                          >
-                            Delete user
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

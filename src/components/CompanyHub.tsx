@@ -22,6 +22,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { fetchCompanyNews } from "../services/newsService";
+import { supabase } from "@/lib/supabase";
 
 interface NewsArticle {
   id: string;
@@ -49,115 +50,124 @@ const CompanyHub = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Mock data for news articles
-  const newsArticles: NewsArticle[] = [
-    {
-      id: "1",
-      title: "Company Announces New Remote Work Policy",
-      summary:
-        "Effective next month, all employees will have the option to work remotely up to 3 days per week.",
-      date: "2023-06-15",
-      source: "Company Intranet",
-      category: "Policy Update",
-      url: "#",
-    },
-    {
-      id: "2",
-      title: "Annual Performance Review Process Changes",
-      summary:
-        "HR department announces simplified performance review process with quarterly check-ins.",
-      date: "2023-05-28",
-      source: "HR Newsletter",
-      category: "HR Update",
-      url: "#",
-    },
-    {
-      id: "3",
-      title: "New Benefits Package Announced for Next Year",
-      summary:
-        "Enhanced healthcare options and additional wellness benefits will be available starting January.",
-      date: "2023-05-10",
-      source: "Benefits Department",
-      category: "Benefits",
-      url: "#",
-    },
-    {
-      id: "4",
-      title: "Company Recognized as Top Employer for Diversity",
-      summary:
-        "Our organization has been named one of the top employers for diversity and inclusion initiatives.",
-      date: "2023-04-22",
-      source: "External Media",
-      category: "Recognition",
-      url: "#",
-    },
-    {
-      id: "5",
-      title: "Upcoming Training Sessions on New Collaboration Tools",
-      summary:
-        "IT department will be hosting training sessions on the newly implemented collaboration platform.",
-      date: "2023-04-15",
-      source: "IT Department",
-      category: "Training",
-      url: "#",
-    },
-  ];
+  const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [isLoadingPolicies, setIsLoadingPolicies] = useState(false);
+  const [policyError, setPolicyError] = useState<string | null>(null);
 
-  // Mock data for policies
-  const policies: Policy[] = [
-    {
-      id: "1",
-      title: "Remote Work Policy",
-      category: "Work Arrangements",
-      lastUpdated: "2023-06-01",
-      summary:
-        "Guidelines for remote work eligibility, expectations, and procedures.",
-    },
-    {
-      id: "2",
-      title: "Code of Conduct",
-      category: "Ethics",
-      lastUpdated: "2023-03-15",
-      summary:
-        "Standards of behavior expected from all employees in the workplace.",
-    },
-    {
-      id: "3",
-      title: "Parental Leave Policy",
-      category: "Benefits",
-      lastUpdated: "2023-02-10",
-      summary: "Details on parental leave eligibility, duration, and benefits.",
-    },
-    {
-      id: "4",
-      title: "Anti-Harassment Policy",
-      category: "Workplace Conduct",
-      lastUpdated: "2022-11-20",
-      summary: "Procedures for reporting and addressing workplace harassment.",
-    },
-    {
-      id: "5",
-      title: "Travel and Expense Policy",
-      category: "Finance",
-      lastUpdated: "2022-10-05",
-      summary:
-        "Guidelines for business travel approval and expense reimbursement.",
-    },
-    {
-      id: "6",
-      title: "Data Privacy Policy",
-      category: "Security",
-      lastUpdated: "2022-09-12",
-      summary: "Requirements for handling sensitive company and customer data.",
-    },
-    {
-      id: "7",
-      title: "Performance Review Process",
-      category: "HR",
-      lastUpdated: "2022-08-30",
-      summary: "Overview of the performance evaluation cycle and expectations.",
-    },
-  ];
+  // Fetch internal news articles from Supabase
+  useEffect(() => {
+    const fetchInternalNews = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("company_news")
+          .select("*")
+          .order("date", { ascending: false });
+
+        if (error) throw error;
+
+        if (data) {
+          setNewsArticles(
+            data.map((item: any) => ({
+              id: item.id,
+              title: item.title,
+              summary: item.summary,
+              date: item.date,
+              source: item.source,
+              category: item.category,
+              url: item.url || "#",
+            })),
+          );
+        }
+      } catch (err) {
+        console.error("Error fetching internal news:", err);
+        // Set default news if database fetch fails
+        setNewsArticles([
+          {
+            id: "1",
+            title: "Company Announces New Remote Work Policy",
+            summary:
+              "Effective next month, all employees will have the option to work remotely up to 3 days per week.",
+            date: "2023-06-15",
+            source: "Company Intranet",
+            category: "Policy Update",
+            url: "#",
+          },
+          {
+            id: "2",
+            title: "Annual Performance Review Process Changes",
+            summary:
+              "HR department announces simplified performance review process with quarterly check-ins.",
+            date: "2023-05-28",
+            source: "HR Newsletter",
+            category: "HR Update",
+            url: "#",
+          },
+        ]);
+      }
+    };
+
+    fetchInternalNews();
+  }, []);
+
+  // Fetch company policies from Supabase
+  useEffect(() => {
+    const fetchPolicies = async () => {
+      if (activeTab === "policies") {
+        setIsLoadingPolicies(true);
+        setPolicyError(null);
+
+        try {
+          const { data, error } = await supabase
+            .from("company_policies")
+            .select("*")
+            .order("last_updated", { ascending: false });
+
+          if (error) throw error;
+
+          if (data) {
+            setPolicies(
+              data.map((item: any) => ({
+                id: item.id,
+                title: item.title,
+                category: item.category,
+                lastUpdated: item.last_updated,
+                summary: item.summary,
+              })),
+            );
+          }
+        } catch (err) {
+          console.error("Error fetching policies:", err);
+          setPolicyError(
+            "Failed to load company policies. Please try again later.",
+          );
+          // Set default policies if database fetch fails
+          setPolicies([
+            {
+              id: "1",
+              title: "Remote Work Policy",
+              category: "Work Arrangements",
+              lastUpdated: "2023-06-01",
+              summary:
+                "Guidelines for remote work eligibility, expectations, and procedures.",
+            },
+            {
+              id: "2",
+              title: "Code of Conduct",
+              category: "Ethics",
+              lastUpdated: "2023-03-15",
+              summary:
+                "Standards of behavior expected from all employees in the workplace.",
+            },
+          ]);
+        } finally {
+          setIsLoadingPolicies(false);
+        }
+      }
+    };
+
+    fetchPolicies();
+  }, [activeTab]);
 
   // Fetch public news about the company using the news service
   useEffect(() => {

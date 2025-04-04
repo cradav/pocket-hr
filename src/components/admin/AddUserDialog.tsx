@@ -24,22 +24,46 @@ const AddUserDialog: React.FC<AddUserDialogProps> = ({ onUserAdded }) => {
   const handleSubmit = async (values: any) => {
     setIsSubmitting(true);
     try {
-      // In a real application, this would be an API call
-      // For now, we'll simulate a network request with a timeout
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      // Import supabase client
+      const { supabase } = await import("@/lib/supabase");
 
-      // Create a new user with the form values
-      const newUser: User = {
-        id: `user-${Date.now()}`, // Generate a temporary ID
+      // Prepare the data for Supabase insert
+      const userData = {
         name: values.name,
         email: values.email,
-        company: values.company,
+        company: values.company || "Not specified",
+        role: values.role === UserRole.ADMIN ? "admin" : "user",
+        is_active: values.status === UserStatus.ACTIVE,
+        plan_id: values.planId || "free",
+        word_credits_remaining: values.wordCredits?.remaining || 0,
+        word_credits_total: values.wordCredits?.total || 0,
+      };
+
+      console.log("Sending user data to Supabase:", userData);
+
+      // Insert the new user into Supabase
+      const { data, error } = await supabase
+        .from("users")
+        .insert(userData)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (!data) throw new Error("Failed to create user");
+
+      // Create a new user with the form values and returned data
+      const newUser: User = {
+        id: data.id,
+        name: values.name,
+        email: values.email,
+        company: values.company || "Not specified",
         role: values.role,
         status: values.status,
-        planId: "plan1", // Default plan
-        createdAt: new Date().toISOString(),
-        lastLogin: new Date().toISOString(),
-        wordCredits: values.wordCredits,
+        planId: values.planId || "free",
+        createdAt: data.created_at || new Date().toISOString(),
+        lastLogin: data.last_sign_in_at || new Date().toISOString(),
+        wordCredits: values.wordCredits || { remaining: 0, total: 0 },
         avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${values.name.toLowerCase().replace(/\s+/g, "")}`,
       };
 
@@ -48,8 +72,9 @@ const AddUserDialog: React.FC<AddUserDialogProps> = ({ onUserAdded }) => {
 
       // Close the dialog
       setOpen(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error adding user:", error);
+      alert(`Failed to add user: ${error.message || "Unknown error"}`);
     } finally {
       setIsSubmitting(false);
     }

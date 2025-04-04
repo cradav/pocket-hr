@@ -34,6 +34,9 @@ const formSchema = z.object({
   }),
   role: z.nativeEnum(UserRole),
   status: z.nativeEnum(UserStatus),
+  planId: z.string().min(1, {
+    message: "Plan is required.",
+  }),
   wordCredits: z.object({
     total: z.number().min(0),
     remaining: z.number().min(0),
@@ -48,6 +51,14 @@ interface UserFormProps {
   isSubmitting?: boolean;
 }
 
+// Available plans
+const plans = [
+  { id: "free", name: "Free Plan" },
+  { id: "basic", name: "Basic Plan" },
+  { id: "pro", name: "Pro Plan" },
+  { id: "enterprise", name: "Enterprise Plan" },
+];
+
 const UserForm: React.FC<UserFormProps> = ({
   defaultValues = {
     name: "",
@@ -55,6 +66,7 @@ const UserForm: React.FC<UserFormProps> = ({
     company: "",
     role: UserRole.USER,
     status: UserStatus.ACTIVE,
+    planId: "free",
     wordCredits: {
       total: 10000,
       remaining: 10000,
@@ -169,6 +181,34 @@ const UserForm: React.FC<UserFormProps> = ({
             )}
           />
         </div>
+
+        <FormField
+          control={form.control}
+          name="planId"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Subscription Plan</FormLabel>
+              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                <FormControl>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a plan" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {plans.map((plan) => (
+                    <SelectItem key={plan.id} value={plan.id}>
+                      {plan.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormDescription>
+                The subscription plan for this user
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
         <FormField
           control={form.control}
