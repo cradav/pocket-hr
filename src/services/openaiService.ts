@@ -21,7 +21,8 @@ export async function generateOpenAIResponse(
 ): Promise<OpenAIResponse> {
   try {
     // Check if we have an OpenAI API key
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    const apiKey =
+      import.meta.env.VITE_OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY;
 
     if (!apiKey) {
       console.error(
@@ -35,7 +36,10 @@ export async function generateOpenAIResponse(
     }
 
     // If we're in development mode and no API key is available, return mock data
-    if (import.meta.env.DEV && !apiKey) {
+    if (
+      (import.meta.env.DEV || process.env.NODE_ENV === "development") &&
+      !apiKey
+    ) {
       console.log("Using mock data for OpenAI response (no API key available)");
 
       // Simulate API delay
