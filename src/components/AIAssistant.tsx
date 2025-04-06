@@ -611,11 +611,52 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
     }
   };
 
+  // Get filtered stages and assistants based on user preferences
+  const getFilteredStages = () => {
+    // Get visibility preferences from localStorage
+    let visibilityPreferences: Record<string, boolean> = {};
+    try {
+      const storedPreferences = localStorage.getItem("aiCategoryVisibility");
+      if (storedPreferences) {
+        visibilityPreferences = JSON.parse(storedPreferences);
+      }
+    } catch (error) {
+      console.error("Error parsing visibility preferences:", error);
+    }
+
+    // If no preferences are set, return all stages
+    if (Object.keys(visibilityPreferences).length === 0) {
+      return stagesWithConversations;
+    }
+
+    // Filter stages based on visibility preferences
+    return stagesWithConversations.filter((stage) => {
+      // Check if stage is visible
+      const stageKey = `stage-${stage.id}`;
+      if (visibilityPreferences[stageKey] === false) {
+        return false;
+      }
+
+      // Filter assistants within the stage
+      const filteredAssistants = stage.assistants.filter((assistant) => {
+        const assistantKey = `assistant-${assistant.id}`;
+        return visibilityPreferences[assistantKey] !== false;
+      });
+
+      // Update stage with filtered assistants
+      stage.assistants = filteredAssistants;
+
+      // Only include stages that have at least one visible assistant
+      return filteredAssistants.length > 0;
+    });
+  };
+
   // Career stage changes are now handled by the Sidebar component
   // This effect handles updates when the selectedCareerStage prop changes
   useEffect(() => {
     // Find the selected stage
-    const stage = stagesWithConversations.find(
+    const filteredStages = getFilteredStages();
+    const stage = filteredStages.find(
       (stage) => stage.id === selectedCareerStage,
     );
     if (stage) {
@@ -1198,7 +1239,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                 ) : (
                   <div className="space-y-4">
                     {/* Display only the assistants for the selected career stage */}
-                    {stagesWithConversations
+                    {getFilteredStages()
                       .filter((stage) => stage.id === selectedCareerStage)
                       .map((stage) => (
                         <div key={stage.id} className="space-y-4">
@@ -1372,7 +1413,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
           <div className="flex items-center">
             {activeConversation ? (
               <div className="text-xs md:text-sm font-medium truncate max-w-[150px] md:max-w-[250px]">
-                {stagesWithConversations.map((stage) =>
+                {getFilteredStages().map((stage) =>
                   stage.assistants.map((assistant) =>
                     assistant.conversations.find(
                       (conv) => conv.id === activeConversation?.id,
@@ -1386,7 +1427,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
               </div>
             ) : (
               <div className="text-xs md:text-sm font-medium truncate max-w-[150px] md:max-w-[250px]">
-                {stagesWithConversations.map((stage) =>
+                {getFilteredStages().map((stage) =>
                   stage.assistants.find((a) => a.id === selectedAssistant) ? (
                     <span key={stage.id}>
                       {

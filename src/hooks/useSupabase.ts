@@ -168,7 +168,15 @@ export function useAuth() {
 
 export function useProfile() {
   const [profile, setProfile] = useState<any>(null);
+  const [firstName, setFirstName] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [privacySettings, setPrivacySettings] = useState({
+    dataSharing: false,
+    profileVisibility: false,
+    documentAccess: false,
+    analyticsConsent: false,
+    marketingConsent: false,
+  });
   const { user } = useAuth();
 
   useEffect(() => {
@@ -192,6 +200,36 @@ export function useProfile() {
 
         if (error) throw error;
         setProfile(data);
+
+        // Extract first name from profile data
+        if (data) {
+          // Try to get first name from various possible fields
+          const name = data.first_name || data.name || data.full_name || "";
+          // If we have a full name, extract just the first name
+          const firstName = name.split(" ")[0];
+          setFirstName(firstName);
+
+          // Load privacy settings if they exist
+          if (data.privacy_settings) {
+            try {
+              // If privacy_settings is stored as a JSON string, parse it
+              const settings =
+                typeof data.privacy_settings === "string"
+                  ? JSON.parse(data.privacy_settings)
+                  : data.privacy_settings;
+
+              setPrivacySettings({
+                dataSharing: settings.dataSharing ?? false,
+                profileVisibility: settings.profileVisibility ?? false,
+                documentAccess: settings.documentAccess ?? false,
+                analyticsConsent: settings.analyticsConsent ?? false,
+                marketingConsent: settings.marketingConsent ?? false,
+              });
+            } catch (e) {
+              console.error("Error parsing privacy settings:", e);
+            }
+          }
+        }
       } catch (error) {
         console.error("Error loading profile:", error);
       } finally {
@@ -225,10 +263,44 @@ export function useProfile() {
     }
   };
 
+  const updatePrivacySettings = async (settings: any) => {
+    if (!user) return { error: new Error("No user logged in") };
+
+    try {
+      // Update local state first for immediate UI feedback
+      setPrivacySettings((prev) => ({ ...prev, ...settings }));
+
+      // Prepare the update with all current settings
+      const updatedSettings = { ...privacySettings, ...settings };
+
+      if (!supabase) {
+        throw new Error("Supabase client not initialized");
+      }
+
+      // Update the privacy_settings field in the users table
+      const { data, error } = await supabase
+        .from("users")
+        .update({ privacy_settings: updatedSettings })
+        .eq("id", user.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      setProfile(data);
+      return { data, error: null };
+    } catch (error) {
+      console.error("Error updating privacy settings:", error);
+      return { data: null, error };
+    }
+  };
+
   return {
     profile,
+    firstName,
     loading,
+    privacySettings,
     updateProfile,
+    updatePrivacySettings,
   };
 }
 

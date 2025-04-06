@@ -32,6 +32,7 @@ import {
   useStripe,
   useElements,
 } from "@stripe/react-stripe-js";
+import { careerStages } from "./AIAssistant/data";
 
 // Initialize Stripe with your publishable key
 const stripePromise = loadStripe(
@@ -156,7 +157,13 @@ const PaymentForm = () => {
 
 const AccountSettings = () => {
   const { user } = useAuth();
-  const { profile, loading: profileLoading, updateProfile } = useProfile();
+  const {
+    profile,
+    loading: profileLoading,
+    updateProfile,
+    privacySettings,
+    updatePrivacySettings,
+  } = useProfile();
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
@@ -173,6 +180,12 @@ const AccountSettings = () => {
   const [pushNotifications, setPushNotifications] = useState(true);
   const [weeklyDigest, setWeeklyDigest] = useState(false);
   const [consultationReminders, setConsultationReminders] = useState(true);
+
+  // AI category visibility preferences
+  const [visibleCategories, setVisibleCategories] = useState<
+    Record<string, boolean>
+  >({});
+  const [aiCategorySaveSuccess, setAiCategorySaveSuccess] = useState(false);
 
   useEffect(() => {
     if (user && profile) {
@@ -191,6 +204,38 @@ const AccountSettings = () => {
       setConsultationReminders(profile.consultation_reminders !== false);
     }
   }, [user, profile]);
+
+  // Load AI category visibility preferences from localStorage
+  useEffect(() => {
+    const storedPreferences = localStorage.getItem("aiCategoryVisibility");
+    if (storedPreferences) {
+      try {
+        const parsedPreferences = JSON.parse(storedPreferences);
+        setVisibleCategories(parsedPreferences);
+      } catch (e) {
+        console.error("Error parsing stored AI category preferences", e);
+        // If there's an error, initialize with all categories visible
+        const defaultVisibility: Record<string, boolean> = {};
+        careerStages.forEach((stage) => {
+          defaultVisibility[stage.id] = true;
+          stage.assistants.forEach((assistant) => {
+            defaultVisibility[assistant.id] = true;
+          });
+        });
+        setVisibleCategories(defaultVisibility);
+      }
+    } else {
+      // If no preferences are stored, initialize with all categories visible
+      const defaultVisibility: Record<string, boolean> = {};
+      careerStages.forEach((stage) => {
+        defaultVisibility[stage.id] = true;
+        stage.assistants.forEach((assistant) => {
+          defaultVisibility[assistant.id] = true;
+        });
+      });
+      setVisibleCategories(defaultVisibility);
+    }
+  }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -252,6 +297,24 @@ const AccountSettings = () => {
     }
   };
 
+  // Toggle visibility of a category
+  const toggleCategoryVisibility = (categoryId: string) => {
+    setVisibleCategories((prev) => ({
+      ...prev,
+      [categoryId]: !prev[categoryId],
+    }));
+  };
+
+  // Save AI category preferences
+  const saveAICategoryPreferences = () => {
+    localStorage.setItem(
+      "aiCategoryVisibility",
+      JSON.stringify(visibleCategories),
+    );
+    setAiCategorySaveSuccess(true);
+    setTimeout(() => setAiCategorySaveSuccess(false), 3000);
+  };
+
   const isPremium = profile?.plan_type === "premium";
 
   return (
@@ -274,7 +337,9 @@ const AccountSettings = () => {
           <TabsList className="mb-6">
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="notifications">Notifications</TabsTrigger>
+            <TabsTrigger value="ai-categories">AI Categories</TabsTrigger>
             <TabsTrigger value="security">Security</TabsTrigger>
+            <TabsTrigger value="privacy">Privacy</TabsTrigger>
             <TabsTrigger value="billing">Billing</TabsTrigger>
           </TabsList>
 
@@ -490,6 +555,83 @@ const AccountSettings = () => {
             </Card>
           </TabsContent>
 
+          <TabsContent value="ai-categories">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <User className="h-5 w-5" />
+                  AI Assistant Categories
+                </CardTitle>
+                <CardDescription>
+                  Choose which AI assistant categories to show in the sidebar
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {careerStages.map((stage) => (
+                  <div
+                    key={stage.id}
+                    className="border rounded-md p-4 space-y-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium text-base">{stage.name}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          AI assistance for {stage.name.toLowerCase()} stage
+                        </p>
+                      </div>
+                      <Switch
+                        checked={visibleCategories[stage.id] !== false}
+                        onCheckedChange={() =>
+                          toggleCategoryVisibility(stage.id)
+                        }
+                      />
+                    </div>
+
+                    <div className="pl-4 border-l-2 border-gray-200 space-y-3">
+                      {stage.assistants.map((assistant) => (
+                        <div
+                          key={assistant.id}
+                          className="flex items-center justify-between"
+                        >
+                          <div>
+                            <h5 className="font-medium">{assistant.name}</h5>
+                            <p className="text-sm text-muted-foreground">
+                              {assistant.description}
+                            </p>
+                          </div>
+                          <Switch
+                            checked={visibleCategories[assistant.id] !== false}
+                            onCheckedChange={() =>
+                              toggleCategoryVisibility(assistant.id)
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+              <CardFooter>
+                <Button
+                  onClick={saveAICategoryPreferences}
+                  className={aiCategorySaveSuccess ? "bg-green-600" : ""}
+                >
+                  {aiCategorySaveSuccess ? (
+                    <span className="flex items-center gap-2">
+                      <Save className="h-4 w-4" />
+                      Saved!
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Save className="h-4 w-4" />
+                      Save Category Preferences
+                    </span>
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="security">
             <Card>
               <CardHeader>
@@ -558,6 +700,125 @@ const AccountSettings = () => {
                 <Button>
                   <Save className="h-4 w-4 mr-2" />
                   Update Security Settings
+                </Button>
+              </CardFooter>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="privacy">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  Privacy & Data Settings
+                </CardTitle>
+                <CardDescription>
+                  Control how your data is used and shared within the platform
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Data Sharing</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Allow AI assistants to access your profile data to
+                        personalize responses
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacySettings.dataSharing}
+                      onCheckedChange={(checked) => {
+                        updatePrivacySettings({ dataSharing: checked });
+                      }}
+                    />
+                  </div>
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Profile Visibility</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Make your profile visible to other users in the platform
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacySettings.profileVisibility}
+                      onCheckedChange={(checked) => {
+                        updatePrivacySettings({ profileVisibility: checked });
+                      }}
+                    />
+                  </div>
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Document Access</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Allow AI assistants to access your uploaded documents
+                        for analysis
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacySettings.documentAccess}
+                      onCheckedChange={(checked) => {
+                        updatePrivacySettings({ documentAccess: checked });
+                      }}
+                    />
+                  </div>
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Analytics Consent</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Allow us to collect anonymous usage data to improve our
+                        services
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacySettings.analyticsConsent}
+                      onCheckedChange={(checked) => {
+                        updatePrivacySettings({ analyticsConsent: checked });
+                      }}
+                    />
+                  </div>
+                  <Separator />
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-medium">Marketing Communications</h4>
+                      <p className="text-sm text-muted-foreground">
+                        Receive updates about new features and promotional
+                        offers
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacySettings.marketingConsent}
+                      onCheckedChange={(checked) => {
+                        updatePrivacySettings({ marketingConsent: checked });
+                      }}
+                    />
+                  </div>
+                </div>
+              </CardContent>
+              <CardFooter>
+                <Button
+                  onClick={() => {
+                    // This is handled automatically by the individual switches
+                    // but we could add a bulk save function here if needed
+                    setSaveSuccess(true);
+                    setTimeout(() => setSaveSuccess(false), 3000);
+                  }}
+                  className={saveSuccess ? "bg-green-600" : ""}
+                >
+                  {saveSuccess ? (
+                    <span className="flex items-center gap-2">
+                      <Save className="h-4 w-4" />
+                      Saved!
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-2">
+                      <Save className="h-4 w-4" />
+                      Save Privacy Settings
+                    </span>
+                  )}
                 </Button>
               </CardFooter>
             </Card>

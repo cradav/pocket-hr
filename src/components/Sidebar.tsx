@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { LogOut, X, ChevronRight, ChevronDown } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
@@ -30,6 +30,41 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [expandedAIMenu, setExpandedAIMenu] = useState(
     activeTab === "ai-assistant",
   );
+  const [visibleCategories, setVisibleCategories] = useState<
+    Record<string, boolean>
+  >({});
+
+  // Load category visibility preferences from localStorage
+  useEffect(() => {
+    const storedPreferences = localStorage.getItem("aiCategoryVisibility");
+    if (storedPreferences) {
+      try {
+        const parsedPreferences = JSON.parse(storedPreferences);
+        setVisibleCategories(parsedPreferences);
+      } catch (e) {
+        console.error("Error parsing stored AI category preferences", e);
+        // If there's an error, show all categories by default
+        const defaultVisibility: Record<string, boolean> = {};
+        careerStages.forEach((stage) => {
+          defaultVisibility[stage.id] = true;
+          stage.assistants.forEach((assistant) => {
+            defaultVisibility[assistant.id] = true;
+          });
+        });
+        setVisibleCategories(defaultVisibility);
+      }
+    } else {
+      // If no preferences are stored, show all categories by default
+      const defaultVisibility: Record<string, boolean> = {};
+      careerStages.forEach((stage) => {
+        defaultVisibility[stage.id] = true;
+        stage.assistants.forEach((assistant) => {
+          defaultVisibility[assistant.id] = true;
+        });
+      });
+      setVisibleCategories(defaultVisibility);
+    }
+  }, []);
 
   const handleSignOut = async () => {
     await signOut();
@@ -40,11 +75,34 @@ const Sidebar: React.FC<SidebarProps> = ({
     setSelectedCareerStage(stageId);
     setActiveTab("ai-assistant");
 
-    // Set the first assistant of the selected career stage as default
+    // Set the first visible assistant of the selected career stage as default
     const stage = careerStages.find((stage) => stage.id === stageId);
-    if (stage && stage.assistants.length > 0) {
-      setSelectedAssistant(stage.assistants[0].id);
+    if (stage) {
+      // Filter assistants based on visibility
+      const filteredAssistants = stage.assistants.filter(
+        (assistant) => visibleCategories[assistant.id] !== false,
+      );
+
+      if (filteredAssistants.length > 0) {
+        // Use the first visible assistant
+        setSelectedAssistant(filteredAssistants[0].id);
+      } else if (stage.assistants.length > 0) {
+        // If no visible assistants, use the first one anyway
+        setSelectedAssistant(stage.assistants[0].id);
+      }
     }
+  };
+
+  // Filter visible career stages
+  const filteredCareerStages = careerStages.filter(
+    (stage) => visibleCategories[stage.id] !== false,
+  );
+
+  // Filter visible assistants for each career stage
+  const getFilteredAssistants = (stage) => {
+    return stage.assistants.filter(
+      (assistant) => visibleCategories[assistant.id] !== false,
+    );
   };
 
   return (
@@ -94,22 +152,28 @@ const Sidebar: React.FC<SidebarProps> = ({
 
             {expandedAIMenu && (
               <div className="pl-4 space-y-1 mt-1">
-                {careerStages.map((stage) => (
-                  <Button
-                    key={stage.id}
-                    variant={
-                      activeTab === "ai-assistant" &&
-                      selectedCareerStage === stage.id
-                        ? "outline"
-                        : "ghost"
-                    }
-                    size="sm"
-                    className="w-full justify-start text-sm"
-                    onClick={() => handleCareerStageSelect(stage.id)}
-                  >
-                    {stage.name}
-                  </Button>
-                ))}
+                {filteredCareerStages.map((stage) => {
+                  // Only show career stages that have at least one visible assistant
+                  const filteredAssistants = getFilteredAssistants(stage);
+                  if (filteredAssistants.length === 0) return null;
+
+                  return (
+                    <Button
+                      key={stage.id}
+                      variant={
+                        activeTab === "ai-assistant" &&
+                        selectedCareerStage === stage.id
+                          ? "outline"
+                          : "ghost"
+                      }
+                      size="sm"
+                      className="w-full justify-start text-sm"
+                      onClick={() => handleCareerStageSelect(stage.id)}
+                    >
+                      {stage.name}
+                    </Button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -136,11 +200,11 @@ const Sidebar: React.FC<SidebarProps> = ({
             Company Hub
           </Button>
           <Button
-            variant={activeTab === "pricing" ? "secondary" : "ghost"}
+            variant={activeTab === "career-pathways" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("pricing")}
+            onClick={() => setActiveTab("career-pathways")}
           >
-            Pricing
+            Career Pathways
           </Button>
         </div>
 
@@ -159,6 +223,13 @@ const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => setActiveTab("account-settings")}
           >
             Account Settings
+          </Button>
+          <Button
+            variant={activeTab === "pricing" ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => setActiveTab("pricing")}
+          >
+            Plans
           </Button>
         </div>
       </div>

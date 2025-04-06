@@ -22,6 +22,7 @@ import Pricing from "./Pricing";
 import DashboardCard from "./DashboardCard";
 import Sidebar from "./Sidebar";
 import AccountSettings from "./AccountSettings";
+import CareerPathways from "./CareerPathways";
 
 const Home = () => {
   const { theme } = useTheme();
@@ -146,7 +147,9 @@ const Home = () => {
                             ? "Pricing Plans"
                             : activeTab === "account-settings"
                               ? "Account Settings"
-                              : "Pocket.HR"}
+                              : activeTab === "career-pathways"
+                                ? "Career Pathways"
+                                : "Pocket.HR"}
             </h2>
           </div>
 
@@ -284,6 +287,12 @@ const Home = () => {
           {activeTab === "company" && <CompanyHub />}
           {activeTab === "pricing" && <Pricing />}
           {activeTab === "account-settings" && <AccountSettings />}
+          {activeTab === "career-pathways" && (
+            <CareerPathways
+              wordCredits={wordCredits}
+              onWordUsage={handleWordUsage}
+            />
+          )}
 
           {activeTab === "privacy" && (
             <Card className="w-full max-w-4xl mx-auto">

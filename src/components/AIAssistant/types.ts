@@ -47,6 +47,11 @@ export interface Assistant {
   isActive: boolean;
   createdAt: Date;
   lastUpdated: Date;
+  userDataAccess?: {
+    documents: boolean;
+    profileInfo: boolean;
+    companyData: boolean;
+  };
 }
 
 export interface CareerStage {

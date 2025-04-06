@@ -18,6 +18,7 @@ export async function generateOpenAIResponse(
   assistantMode: string,
   systemPrompt?: string,
   config?: OpenAIConfig,
+  userName?: string,
 ): Promise<OpenAIResponse> {
   try {
     // Check if we have an OpenAI API key
@@ -49,8 +50,13 @@ export async function generateOpenAIResponse(
     }
 
     // Prepare the system prompt based on the assistant mode
-    const finalSystemPrompt =
+    let finalSystemPrompt =
       systemPrompt || getSystemPromptForMode(assistantMode);
+
+    // Add user's name to the system prompt if available
+    if (userName) {
+      finalSystemPrompt = `${finalSystemPrompt} Address the user as ${userName} when it feels natural in conversation. Make the conversation feel personalized.`;
+    }
 
     // Make the API call to OpenAI
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
