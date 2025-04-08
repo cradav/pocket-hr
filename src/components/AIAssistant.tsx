@@ -86,12 +86,12 @@ interface VoiceResponse {
 import { supabase } from "@/lib/supabase";
 
 const AIAssistant: React.FC<AIAssistantProps> = ({
-  onRequestHumanSupport = () => {},
+  onRequestHumanSupport = () => { },
   wordCredits = { remaining: 1000, total: 1000 },
-  onWordUsage = () => {},
+  onWordUsage = () => { },
   selectedCareerStage = "excelling",
   selectedAssistant = "performance-advisor",
-  setSelectedAssistant = () => {},
+  setSelectedAssistant = () => { },
 }) => {
   const [stagesWithConversations, setStagesWithConversations] = useState(
     initializeCareerStages,
@@ -656,11 +656,10 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
   useEffect(() => {
     // Find the selected stage
     const filteredStages = getFilteredStages();
-    const stage = filteredStages.find(
-      (stage) => stage.id === selectedCareerStage,
-    );
+    const stage = filteredStages.find((stage) => stage.id === selectedCareerStage);
+
     if (stage) {
-      // Add a system message when career stage changes
+
       const stageChangeMessage: Message = {
         id: Date.now().toString(),
         content: `I'm now focusing on "${stage.name}" stage. You can select a specific assistant for more targeted help.`,
@@ -668,7 +667,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
         timestamp: new Date(),
       };
 
-      setMessages((prev) => [...prev, stageChangeMessage]);
+      // Replace all messages with just the stage change message
+      setMessages([stageChangeMessage]);
 
       // Reset the selected assistant to collapse all conversations
       setSelectedAssistant("");
