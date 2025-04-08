@@ -37,41 +37,64 @@ const Home = () => {
     "performance-advisor",
   );
 
-  // Auto-login as admin
-  const { user: authUser, loading } = useAuth();
+  const { user: authUser } = useAuth();
+  const isAdmin = authUser?.user_metadata?.role === 'admin';
+
+  // Fetch user data from Supabase
+  const [userData, setUserData] = useState({
+    name: "",
+    email: "",
+    company: "",
+    avatar: "",
+  });
 
   useEffect(() => {
-    const autoLogin = async () => {
-      if (!authUser && !loading) {
-        console.log("Auto-logging in as admin...");
+    const fetchUserData = async () => {
+      if (authUser) {
+        console.log('Fetching data for user:', authUser.id);
         try {
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email: "craig@craig.com",
-            password: "12345678",
-          });
+          const { data, error } = await supabase
+            .from('users')
+            .select('name, email, company')
+            .eq('id', authUser.id)
+            .single();
+
+          console.log('Supabase response:', { data, error });
 
           if (error) {
-            console.error("Auto-login failed:", error);
-          } else {
-            console.log("Auto-login successful:", data.user?.email);
+            console.error('Error fetching user data:', error);
+            return;
           }
-        } catch (err) {
-          console.error("Auto-login error:", err);
+
+          if (data) {
+            const newUserData = {
+              name: data.name || authUser.email?.split('@')[0] || '',
+              email: data.email || authUser.email || '',
+              company: data.company || 'Not specified',
+              avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.email}`,
+            };
+            console.log('Setting user data:', newUserData);
+            setUserData(newUserData);
+          } else {
+            console.log('No data found, creating fallback user data');
+            // Fallback if no data found
+            setUserData({
+              name: authUser.email?.split('@')[0] || '',
+              email: authUser.email || '',
+              company: 'Not specified',
+              avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser.email}`,
+            });
+          }
+        } catch (error) {
+          console.error('Error:', error);
         }
+      } else {
+        console.log('No authenticated user found');
       }
     };
 
-    autoLogin();
-  }, [authUser, loading]);
-
-  // Mock user data
-  const user = {
-    name: "Jane Smith",
-    email: "jane.smith@example.com",
-    avatar: "https://api.dicebear.com/7.x/avataaars/svg?seed=jane",
-    company: "Acme Corporation",
-    isAdmin: true, // Mock admin status for testing
-  };
+    fetchUserData();
+  }, [authUser]);
 
   // Mock notifications count
   const notificationsCount = 3;
@@ -154,7 +177,7 @@ const Home = () => {
           </div>
 
           <div className="flex items-center space-x-2 md:space-x-4">
-            {user.isAdmin && (
+            {isAdmin && (
               <Link to="/admin">
                 <Button
                   variant="outline"
@@ -181,18 +204,18 @@ const Home = () => {
 
             <div className="flex items-center space-x-1 md:space-x-2">
               <Avatar>
-                <AvatarImage src={user.avatar} alt={user.name} />
+                <AvatarImage src={userData.avatar} alt={userData.name} />
                 <AvatarFallback>
-                  {user.name
+                  {userData.name
                     .split(" ")
                     .map((n) => n[0])
                     .join("")}
                 </AvatarFallback>
               </Avatar>
               <div className="hidden md:block">
-                <p className="text-sm font-medium">{user.name}</p>
-                <p className="text-xs text-muted-foreground">{user.company}</p>
-                {user.isAdmin && <p className="text-xs text-primary">Admin</p>}
+                <p className="text-sm font-medium">{userData.name}</p>
+                <p className="text-xs text-muted-foreground">{userData.company}</p>
+                {isAdmin && <p className="text-xs text-primary">Admin</p>}
               </div>
             </div>
           </div>

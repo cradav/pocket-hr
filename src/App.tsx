@@ -9,6 +9,7 @@ import { useAuth } from "./hooks/useSupabase";
 const Login = lazy(() => import("./pages/Login"));
 const Register = lazy(() => import("./pages/Register"));
 const ThankYou = lazy(() => import("./pages/ThankYou"));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
 
 // Lazy load admin pages
 const AdminDashboard = lazy(() => import("./pages/admin/Dashboard"));
@@ -17,13 +18,7 @@ const AdminPlans = lazy(() => import("./pages/admin/Plans"));
 const AdminAIAssistant = lazy(() => import("./pages/admin/AIAssistant"));
 
 // Protected route component
-// TEMPORARY: Authentication bypass for development
 const ProtectedRoute = ({ children, requiresAdmin = false }) => {
-  // Bypass all authentication checks and always render children
-  console.log("⚠️ DEVELOPMENT MODE: Authentication bypassed for admin access");
-  return children;
-
-  /* Original authentication logic (commented out for now)
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -39,26 +34,13 @@ const ProtectedRoute = ({ children, requiresAdmin = false }) => {
   }
 
   if (requiresAdmin) {
-    // In a real app, you would check if the user has admin role
-    // For now, we'll use a simple check based on email domain or hardcoded list
-    const isAdmin =
-      user.email?.endsWith("@admin.pockethr.com") ||
-      user.email?.toLowerCase() === "craig@craig.com" ||
-      user.app_metadata?.role === "admin" ||
-      user.user_metadata?.role === "admin" ||
-      false;
-    console.log("Admin check:", {
-      email: user.email,
-      isAdmin,
-      metadata: user.user_metadata,
-    });
+    const isAdmin = user.user_metadata?.role === 'admin' || false;
     if (!isAdmin) {
       return <Navigate to="/" replace />;
     }
   }
 
   return children;
-  */
 };
 
 function App() {
@@ -75,10 +57,18 @@ function App() {
       >
         <div className="min-h-screen w-full overflow-x-hidden">
           <Routes>
-            <Route path="/" element={<Home />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Home />
+                </ProtectedRoute>
+              }
+            />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/thank-you" element={<ThankYou />} />
+            <Route path="/verify-email" element={<VerifyEmail />} />
 
             {/* Admin Routes */}
             <Route

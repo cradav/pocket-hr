@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useSupabase";
 import { Linkedin, Mail, Github } from "lucide-react";
+import { logger } from "@/utils/logger";
 
 const loginSchema = z.object({
   email: z.string().email({ message: "Please enter a valid email address" }),
@@ -111,29 +112,24 @@ export default function AuthForm() {
     setError(null);
 
     try {
-      console.log(`Login attempt from form: ${values.email}`);
+      logger.debug("Login attempt", { email: values.email });
       const response = await signIn(values.email, values.password);
 
       if (response.error) {
-        console.error("Login error:", response.error);
-        if (
-          response.error.message.includes("Supabase client not initialized")
-        ) {
-          setError(
-            "Unable to connect to authentication service. Please check your connection or try again later.",
-          );
+        if (response.error.message.includes("Supabase client not initialized")) {
+          setError("Unable to connect to authentication service. Please check your connection or try again later.");
         } else {
-          setError(response.error.message);
+          setError("Invalid email or password");
         }
+        logger.error("Login failed", response.error);
         return;
       }
 
-      console.log("Login successful, redirecting to dashboard");
-      // Redirect to dashboard on successful login
+      logger.debug("Login successful");
       navigate("/");
     } catch (err) {
       setError("An unexpected error occurred. Please try again.");
-      console.error("Unexpected error during login:", err);
+      logger.error("Login error", err);
     } finally {
       setIsLoading(false);
     }
@@ -144,10 +140,9 @@ export default function AuthForm() {
     setError(null);
 
     try {
-      // Extract user data for profile creation
       const { name, company, title, ...authData } = values;
 
-      const { error } = await signUp(authData.email, authData.password, {
+      const { error, data } = await signUp(authData.email, authData.password, {
         name,
         company,
         title,
@@ -155,21 +150,22 @@ export default function AuthForm() {
 
       if (error) {
         if (error.message.includes("Supabase client not initialized")) {
-          setError(
-            "Unable to connect to authentication service. Please check your connection or try again later.",
-          );
-          console.error("Supabase client initialization error:", error);
+          setError("Unable to connect to authentication service. Please check your connection or try again later.");
         } else {
-          setError(error.message);
+          setError("Registration failed. Please try again.");
         }
+        logger.error("Registration failed", error);
         return;
       }
 
-      // Redirect to thank you page
-      navigate("/thank-you");
+      if (data?.user?.identities?.length === 0) {
+        navigate("/verify-email");
+      } else {
+        navigate("/thank-you");
+      }
     } catch (err) {
       setError("An unexpected error occurred. Please try again.");
-      console.error(err);
+      logger.error("Registration error", err);
     } finally {
       setIsLoading(false);
     }

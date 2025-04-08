@@ -1,11 +1,25 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { Session, User } from "@supabase/supabase-js";
+import { useNavigate } from "react-router-dom";
+import { logger } from "@/utils/logger";
+
+// Generic error messages
+const ERROR_MESSAGES = {
+  AUTH: "Authentication error",
+  DATABASE: "Error accessing user data",
+  NETWORK: "Connection error",
+  UNKNOWN: "An unexpected error occurred",
+  NOT_AUTHENTICATED: "No user logged in",
+  VALIDATION: "User validation error",
+  INVALID_CREDENTIALS: "Invalid email or password"
+};
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!supabase) {
@@ -13,95 +27,129 @@ export function useAuth() {
       return;
     }
 
+    const validateUser = async (session: Session | null) => {
+      if (!session?.user) {
+        setSession(null);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const { data: dbUser, error } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", session.user.id)
+          .single();
+
+        if (error || !dbUser) {
+          logger.error(ERROR_MESSAGES.VALIDATION);
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+          navigate("/login");
+        } else {
+          setSession(session);
+          setUser(session.user);
+        }
+      } catch (err) {
+        logger.error(ERROR_MESSAGES.DATABASE, err);
+        await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+        navigate("/login");
+      }
+      setLoading(false);
+    };
+
     // Get the current session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      validateUser(session);
     });
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+      validateUser(session);
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [navigate]);
 
   const signIn = async (email: string, password: string) => {
     if (!supabase) {
-      console.error(
-        "Supabase client not initialized. Check your environment variables.",
-      );
-      return {
-        error: new Error(
-          "Supabase client not initialized. Check your environment variables.",
-        ),
-      };
+      logger.error(ERROR_MESSAGES.NETWORK);
+      return { error: new Error(ERROR_MESSAGES.NETWORK) };
     }
+
     try {
-      console.log(`Attempting login with: ${email} (from useSupabase hook)`);
-      const response = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
-      if (response.error) {
-        console.error("Login error from Supabase:", response.error);
-      } else {
-        console.log("Login successful", response.data.user);
+      if (error) {
+        // Log the error in a safe way
+        logger.error(ERROR_MESSAGES.INVALID_CREDENTIALS);
+        return { data, error: new Error(ERROR_MESSAGES.INVALID_CREDENTIALS) };
       }
 
-      return response;
+      return { data, error: null };
     } catch (err) {
-      console.error("Error during sign in:", err);
+      logger.error(ERROR_MESSAGES.AUTH);
       return {
-        error:
-          err instanceof Error
-            ? err
-            : new Error("Unknown error during sign in"),
+        data: null,
+        error: new Error(ERROR_MESSAGES.AUTH)
       };
     }
   };
 
   const signUp = async (email: string, password: string, userData: any) => {
     if (!supabase) {
-      console.error(
-        "Supabase client not initialized. Check your environment variables.",
-      );
-      return {
-        error: new Error(
-          "Supabase client not initialized. Check your environment variables.",
-        ),
-      };
+      return { data: null, error: new Error(ERROR_MESSAGES.NETWORK) };
     }
     try {
-      const { error } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: userData,
         },
       });
-      return { error };
+
+      if (authError) return { data: null, error: authError };
+
+      if (authData.user) {
+        const { error: profileError } = await supabase
+          .from('users')
+          .insert({
+            id: authData.user.id,
+            email: authData.user.email,
+            name: userData.name,
+            company: userData.company || null,
+            role: 'user',
+            is_active: true,
+            word_credits_remaining: 1000,
+            word_credits_total: 1000
+          });
+
+        if (profileError) {
+          logger.error(ERROR_MESSAGES.DATABASE, profileError);
+          return { data: null, error: new Error(ERROR_MESSAGES.DATABASE) };
+        }
+      }
+
+      return { data: authData, error: null };
     } catch (err) {
-      console.error("Error during sign up:", err);
-      return {
-        error:
-          err instanceof Error
-            ? err
-            : new Error("Unknown error during sign up"),
-      };
+      logger.error(ERROR_MESSAGES.UNKNOWN, err);
+      return { data: null, error: new Error(ERROR_MESSAGES.UNKNOWN) };
     }
   };
 
   const signInWithGoogle = async () => {
     if (!supabase) {
-      return { error: new Error("Supabase client not initialized") };
+      return { error: new Error(ERROR_MESSAGES.NETWORK) };
     }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
@@ -114,7 +162,7 @@ export function useAuth() {
 
   const signInWithLinkedIn = async () => {
     if (!supabase) {
-      return { error: new Error("Supabase client not initialized") };
+      return { error: new Error(ERROR_MESSAGES.NETWORK) };
     }
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "linkedin",
@@ -127,7 +175,7 @@ export function useAuth() {
 
   const signOut = async () => {
     if (!supabase) {
-      return { error: new Error("Supabase client not initialized") };
+      return { error: new Error(ERROR_MESSAGES.NETWORK) };
     }
     const { error } = await supabase.auth.signOut();
     return { error };
@@ -135,7 +183,7 @@ export function useAuth() {
 
   const resetPassword = async (email: string) => {
     if (!supabase) {
-      return { error: new Error("Supabase client not initialized") };
+      return { error: new Error(ERROR_MESSAGES.NETWORK) };
     }
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -143,12 +191,9 @@ export function useAuth() {
       });
       return { error };
     } catch (err) {
-      console.error("Error during password reset:", err);
+      logger.error(ERROR_MESSAGES.AUTH, err);
       return {
-        error:
-          err instanceof Error
-            ? err
-            : new Error("Unknown error during password reset"),
+        error: new Error(ERROR_MESSAGES.AUTH)
       };
     }
   };
