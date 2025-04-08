@@ -28,7 +28,7 @@ interface NewsArticle {
   id: string;
   title: string;
   summary: string;
-  date: string;
+  published_at: string;
   source: string;
   category: string;
   url: string;
@@ -62,7 +62,7 @@ const CompanyHub = () => {
         const { data, error } = await supabase
           .from("company_news")
           .select("*")
-          .order("date", { ascending: false });
+          .order("published_at", { ascending: false });
 
         if (error) throw error;
 
@@ -72,7 +72,7 @@ const CompanyHub = () => {
               id: item.id,
               title: item.title,
               summary: item.summary,
-              date: item.date,
+              published_at: item.published_at,
               source: item.source,
               category: item.category,
               url: item.url || "#",
@@ -88,7 +88,7 @@ const CompanyHub = () => {
             title: "Company Announces New Remote Work Policy",
             summary:
               "Effective next month, all employees will have the option to work remotely up to 3 days per week.",
-            date: "2023-06-15",
+            published_at: "2023-06-15",
             source: "Company Intranet",
             category: "Policy Update",
             url: "#",
@@ -98,7 +98,7 @@ const CompanyHub = () => {
             title: "Annual Performance Review Process Changes",
             summary:
               "HR department announces simplified performance review process with quarterly check-ins.",
-            date: "2023-05-28",
+            published_at: "2023-05-28",
             source: "HR Newsletter",
             category: "HR Update",
             url: "#",
@@ -121,7 +121,7 @@ const CompanyHub = () => {
           const { data, error } = await supabase
             .from("company_policies")
             .select("*")
-            .order("last_updated", { ascending: false });
+            .order("updated_at", { ascending: false });
 
           if (error) throw error;
 
@@ -131,7 +131,7 @@ const CompanyHub = () => {
                 id: item.id,
                 title: item.title,
                 category: item.category,
-                lastUpdated: item.last_updated,
+                lastUpdated: item.updated_at,
                 summary: item.summary,
               })),
             );
@@ -352,7 +352,7 @@ const CompanyHub = () => {
                             <CardTitle>{article.title}</CardTitle>
                             <div className="flex items-center mt-1 text-sm text-muted-foreground">
                               <Clock className="mr-1 h-3 w-3" />
-                              {article.date}
+                              {article.published_at}
                               <span className="mx-2">•</span>
                               {article.source}
                             </div>
@@ -407,7 +407,7 @@ const CompanyHub = () => {
                       <CardTitle>{article.title}</CardTitle>
                       <div className="flex items-center mt-1 text-sm text-muted-foreground">
                         <Clock className="mr-1 h-3 w-3" />
-                        {article.date}
+                        {article.published_at}
                         <span className="mx-2">•</span>
                         {article.source}
                       </div>
