@@ -5,13 +5,31 @@ import { generateOpenAIResponse } from "./openaiService";
  * Parse a resume file or text to extract structured data
  * @param file Resume file (PDF, DOCX, etc.)
  * @param text Resume text (if already extracted)
+ * @param fileUrl URL to fetch resume file from
  * @returns Structured resume data
  */
 export async function parseResume(
   file?: File,
   text?: string,
+  fileUrl?: string,
 ): Promise<ResumeData> {
   try {
+    // If we have a fileUrl but no text or file, fetch the file content
+    if (fileUrl && !text && !file) {
+      try {
+        const response = await fetch(fileUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file: ${response.statusText}`);
+        }
+
+        // Try to get the file as text
+        text = await response.text();
+      } catch (fetchError) {
+        console.error("Error fetching file from URL:", fetchError);
+        throw new Error(`Failed to fetch resume file: ${fetchError.message}`);
+      }
+    }
+
     // If we have a file but no text, extract text from the file
     if (file && !text) {
       text = await extractTextFromFile(file);

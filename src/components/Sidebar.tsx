@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   LogOut,
@@ -40,6 +40,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   selectedAssistant,
   setSelectedAssistant,
 }) => {
+  const sidebarRef = useRef<HTMLDivElement>(null);
   const { signOut } = useAuth();
   const [expandedAIMenu, setExpandedAIMenu] = useState(
     activeTab === "ai-assistant",
@@ -80,9 +81,32 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   }, []);
 
+  // Handle clicks outside the sidebar on mobile
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      // Only handle clicks outside if sidebar is open and we're on mobile
+      if (
+        sidebarOpen &&
+        sidebarRef.current &&
+        !sidebarRef.current.contains(event.target as Node) &&
+        window.innerWidth < 768
+      ) {
+        toggleSidebar();
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [sidebarOpen, toggleSidebar]);
+
   const handleSignOut = async () => {
     await signOut();
     // The auth state change will automatically redirect to login
+    if (window.innerWidth < 768 && sidebarOpen) {
+      toggleSidebar();
+    }
   };
 
   const handleCareerStageSelect = (stageId: string) => {
@@ -105,6 +129,11 @@ const Sidebar: React.FC<SidebarProps> = ({
         setSelectedAssistant(stage.assistants[0].id);
       }
     }
+
+    // Close sidebar on mobile after selection
+    if (window.innerWidth < 768 && sidebarOpen) {
+      toggleSidebar();
+    }
   };
 
   // Filter visible career stages
@@ -119,8 +148,17 @@ const Sidebar: React.FC<SidebarProps> = ({
     );
   };
 
+  // Helper function to close sidebar on mobile after menu item selection
+  const handleMenuItemClick = (tab: string) => {
+    setActiveTab(tab);
+    if (window.innerWidth < 768 && sidebarOpen) {
+      toggleSidebar();
+    }
+  };
+
   return (
     <div
+      ref={sidebarRef}
       className={`${sidebarOpen ? "w-64" : "w-0 -ml-64"} fixed md:static h-full z-50 bg-card border-r transition-all duration-300 flex flex-col`}
     >
       <div className="p-4 border-b flex items-center justify-between">
@@ -141,7 +179,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button
             variant={activeTab === "dashboard" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("dashboard")}
+            onClick={() => handleMenuItemClick("dashboard")}
           >
             <LayoutDashboard className="h-4 w-4 mr-2" />
             Dashboard
@@ -198,7 +236,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button
             variant={activeTab === "documents" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("documents")}
+            onClick={() => handleMenuItemClick("documents")}
           >
             <FileText className="h-4 w-4 mr-2" />
             Documents
@@ -206,7 +244,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button
             variant={activeTab === "support" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("support")}
+            onClick={() => handleMenuItemClick("support")}
           >
             <HeadsetIcon className="h-4 w-4 mr-2" />
             Human Support
@@ -214,7 +252,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button
             variant={activeTab === "company" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("company")}
+            onClick={() => handleMenuItemClick("company")}
           >
             <Building className="h-4 w-4 mr-2" />
             Company Hub
@@ -222,7 +260,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button
             variant={activeTab === "career-pathways" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("career-pathways")}
+            onClick={() => handleMenuItemClick("career-pathways")}
           >
             <GraduationCap className="h-4 w-4 mr-2" />
             Career Pathways
@@ -234,7 +272,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button
             variant={activeTab === "privacy" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("privacy")}
+            onClick={() => handleMenuItemClick("privacy")}
           >
             <ShieldCheck className="h-4 w-4 mr-2" />
             Privacy & Data
@@ -242,7 +280,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button
             variant={activeTab === "account-settings" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("account-settings")}
+            onClick={() => handleMenuItemClick("account-settings")}
           >
             <Settings className="h-4 w-4 mr-2" />
             Account Settings
@@ -250,7 +288,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button
             variant={activeTab === "pricing" ? "secondary" : "ghost"}
             className="w-full justify-start"
-            onClick={() => setActiveTab("pricing")}
+            onClick={() => handleMenuItemClick("pricing")}
           >
             <CreditCard className="h-4 w-4 mr-2" />
             Plans
