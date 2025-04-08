@@ -255,8 +255,12 @@ const DocumentManager = () => {
   // Fetch documents from Supabase with improved error handling
   useEffect(() => {
     const fetchDocuments = async () => {
-      if (!user) return;
-
+      if (!user) {
+        setError("Failed to load documents: User not defined.");
+        setIsLoading(false);
+        return;
+      };
+      
       try {
         console.log("Fetching documents for user:", user.id);
         setIsLoading(true);

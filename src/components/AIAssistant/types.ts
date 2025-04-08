@@ -3,13 +3,15 @@ export interface Message {
   content: string;
   sender: "user" | "ai";
   timestamp: Date;
-  isVoice?: boolean;
+  token_count?: number;
   audioUrl?: string;
+  isVoice?: boolean;
   moderation?: {
     flagged: boolean;
     categories?: string[];
     score?: number;
   };
+  created_at?: string;
 }
 
 export interface Conversation {
