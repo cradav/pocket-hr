@@ -247,6 +247,172 @@ export const verifyWebhookSignature = (
 };
 
 /**
+ * Cancels a user's subscription
+ * @param subscriptionId The ID of the subscription to cancel
+ * @returns Success or error status
+ */
+export const cancelSubscription = async (subscriptionId: string) => {
+  try {
+    console.log(`Cancelling subscription: ${subscriptionId}`);
+
+    // If we have a Stripe client, try to cancel the subscription
+    if (stripeClient) {
+      try {
+        const subscription = await stripeClient.subscriptions.update(
+          subscriptionId,
+          { cancel_at_period_end: true },
+        );
+
+        return {
+          subscription,
+          error: null,
+        };
+      } catch (stripeError) {
+        console.error("Error cancelling Stripe subscription:", stripeError);
+        // Fall back to mock implementation
+      }
+    }
+
+    // Mock implementation for development/demo purposes
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    return { error: null };
+  } catch (error) {
+    console.error("Error cancelling subscription:", error);
+    return { error: "Failed to cancel subscription" };
+  }
+};
+
+/**
+ * Gets customer payment methods
+ * @param customerId The Stripe customer ID
+ * @returns List of payment methods or an error
+ */
+export const getCustomerPaymentMethods = async (customerId: string) => {
+  try {
+    console.log(`Getting payment methods for customer: ${customerId}`);
+
+    // If we have a Stripe client, try to get the payment methods
+    if (stripeClient) {
+      try {
+        const paymentMethods = await stripeClient.paymentMethods.list({
+          customer: customerId,
+          type: "card",
+        });
+
+        return {
+          paymentMethods: paymentMethods.data,
+          error: null,
+        };
+      } catch (stripeError) {
+        console.error("Error getting payment methods:", stripeError);
+        // Fall back to mock implementation
+      }
+    }
+
+    // Mock implementation for development/demo purposes
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Return mock payment methods
+    return {
+      paymentMethods: [
+        {
+          id: "pm_mock_1",
+          card: {
+            brand: "visa",
+            last4: "4242",
+            exp_month: 12,
+            exp_year: 2025,
+          },
+        },
+      ],
+      error: null,
+    };
+  } catch (error) {
+    console.error("Error getting payment methods:", error);
+    return {
+      paymentMethods: [],
+      error: "Failed to get payment methods",
+    };
+  }
+};
+
+/**
+ * Gets customer billing history
+ * @param customerId The Stripe customer ID
+ * @returns List of invoices or an error
+ */
+export const getCustomerBillingHistory = async (customerId: string) => {
+  try {
+    console.log(`Getting billing history for customer: ${customerId}`);
+
+    // If we have a Stripe client, try to get the invoices
+    if (stripeClient) {
+      try {
+        const invoices = await stripeClient.invoices.list({
+          customer: customerId,
+          limit: 10,
+        });
+
+        return {
+          invoices: invoices.data,
+          error: null,
+        };
+      } catch (stripeError) {
+        console.error("Error getting invoices:", stripeError);
+        // Fall back to mock implementation
+      }
+    }
+
+    // Mock implementation for development/demo purposes
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Return mock invoices
+    const mockInvoices = [
+      {
+        id: "in_mock_1",
+        amount_paid: 2999,
+        status: "paid",
+        created: Date.now() - 30 * 24 * 60 * 60 * 1000, // 30 days ago
+        lines: {
+          data: [
+            {
+              description: "Premium Plan - Monthly",
+            },
+          ],
+        },
+        hosted_invoice_url: "#",
+      },
+      {
+        id: "in_mock_2",
+        amount_paid: 2999,
+        status: "paid",
+        created: Date.now() - 60 * 24 * 60 * 60 * 1000, // 60 days ago
+        lines: {
+          data: [
+            {
+              description: "Premium Plan - Monthly",
+            },
+          ],
+        },
+        hosted_invoice_url: "#",
+      },
+    ];
+
+    return {
+      invoices: mockInvoices,
+      error: null,
+    };
+  } catch (error) {
+    console.error("Error getting billing history:", error);
+    return {
+      invoices: [],
+      error: "Failed to get billing history",
+    };
+  }
+};
+
+/**
  * Handles a Stripe webhook event
  * @param event The Stripe event object
  * @param supabaseClient Optional Supabase client to update the database

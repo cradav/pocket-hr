@@ -50,7 +50,183 @@ interface Document {
   uploadDate: string;
   size: string;
   status: "analyzed" | "pending" | "none";
+  fileUrl?: string;
 }
+
+// Utility functions for document management
+const documentUtils = {
+  // Format file size helper function
+  formatFileSize: (bytes: number): string => {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  },
+
+  // Ensure the storage bucket exists
+  ensureStorageBucket: async (bucketName: string): Promise<boolean> => {
+    try {
+      console.log(`Checking if bucket '${bucketName}' exists...`);
+      const { data: buckets, error } = await supabase.storage.listBuckets();
+
+      if (error) {
+        console.error("Error listing buckets:", error);
+        return false;
+      }
+
+      // Check if bucket exists
+      const bucketExists = buckets?.some(
+        (bucket) => bucket.name === bucketName,
+      );
+
+      if (!bucketExists) {
+        console.log(`Creating bucket '${bucketName}'...`);
+        const { error: createError } = await supabase.storage.createBucket(
+          bucketName,
+          {
+            public: true,
+            fileSizeLimit: 10485760, // 10MB limit
+          },
+        );
+
+        if (createError) {
+          console.error(`Error creating bucket '${bucketName}':`, createError);
+          return false;
+        }
+
+        // Set bucket public policy
+        const { error: policyError } = await supabase.storage
+          .from(bucketName)
+          .createSignedUrl(
+            "test.txt", // Dummy file path
+            60, // 60 seconds
+            {
+              download: true,
+            },
+          );
+
+        if (
+          policyError &&
+          !policyError.message.includes("The resource was not found")
+        ) {
+          console.error(
+            `Error setting bucket policy for '${bucketName}':`,
+            policyError,
+          );
+          // Continue anyway, this is not critical
+        }
+
+        console.log(`Bucket '${bucketName}' created successfully.`);
+      } else {
+        console.log(`Bucket '${bucketName}' already exists.`);
+      }
+
+      return true;
+    } catch (err) {
+      console.error(`Error ensuring bucket '${bucketName}' exists:`, err);
+      return false;
+    }
+  },
+
+  // Upload a file to Supabase storage
+  uploadFile: async (
+    file: File,
+    userId: string,
+    onProgress?: (progress: number) => void,
+  ): Promise<{ success: boolean; fileUrl?: string; error?: any }> => {
+    try {
+      console.log("Starting file upload for:", file.name);
+
+      // Ensure bucket exists
+      const bucketName = "phr-bucket";
+      const bucketReady = await documentUtils.ensureStorageBucket(bucketName);
+
+      if (!bucketReady) {
+        throw new Error(`Failed to ensure bucket '${bucketName}' exists`);
+      }
+
+      // Create a unique file path
+      const filePath = `documents/${userId}/${Date.now()}_${file.name}`;
+      console.log("File path:", filePath);
+
+      // Upload file to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(bucketName)
+        .upload(filePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+          onUploadProgress: (progress) => {
+            const percentage = Math.round(
+              (progress.loaded / progress.total) * 100,
+            );
+            console.log(`Upload progress: ${percentage}%`);
+            if (onProgress) onProgress(percentage);
+          },
+        });
+
+      if (uploadError) {
+        console.error("Supabase storage upload error:", uploadError);
+        return { success: false, error: uploadError };
+      }
+
+      console.log("File uploaded successfully, getting public URL");
+
+      // Get public URL for the file
+      const { data: urlData } = await supabase.storage
+        .from(bucketName)
+        .getPublicUrl(filePath);
+
+      if (!urlData || !urlData.publicUrl) {
+        const error = new Error("Failed to get public URL for uploaded file");
+        console.error(error);
+        return { success: false, error };
+      }
+
+      console.log("Public URL obtained:", urlData.publicUrl);
+      return { success: true, fileUrl: urlData.publicUrl };
+    } catch (err) {
+      console.error("Error uploading file:", err);
+      return { success: false, error: err };
+    }
+  },
+
+  // Create a document record in the database
+  createDocumentRecord: async (
+    userId: string,
+    name: string,
+    type: string,
+    size: number,
+    fileUrl: string,
+  ): Promise<{ success: boolean; document?: any; error?: any }> => {
+    try {
+      console.log("Creating document record in database...");
+
+      const { data, error } = await supabase
+        .from("documents")
+        .insert({
+          user_id: userId,
+          name: name,
+          type: type,
+          size: size,
+          file_url: fileUrl,
+          upload_date: new Date().toISOString(),
+          analysis_status: "none",
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error creating document record:", error);
+        return { success: false, error };
+      }
+
+      console.log("Document record created successfully:", data);
+      return { success: true, document: data };
+    } catch (err) {
+      console.error("Error creating document record:", err);
+      return { success: false, error: err };
+    }
+  },
+};
 
 const DocumentManager = () => {
   const [activeTab, setActiveTab] = useState("all");
@@ -64,14 +240,25 @@ const DocumentManager = () => {
   const [error, setError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const { user } = useAuth();
 
-  // Fetch documents from Supabase
+  // Log authentication state for debugging
+  useEffect(() => {
+    console.log("Authentication state:", {
+      isAuthenticated: !!user,
+      userId: user?.id,
+    });
+  }, [user]);
+
+  // Fetch documents from Supabase with improved error handling
   useEffect(() => {
     const fetchDocuments = async () => {
       if (!user) return;
 
       try {
+        console.log("Fetching documents for user:", user.id);
         setIsLoading(true);
         setError(null);
 
@@ -81,7 +268,29 @@ const DocumentManager = () => {
           .eq("user_id", user.id)
           .order("upload_date", { ascending: false });
 
-        if (error) throw error;
+        if (error) {
+          console.error("Error fetching documents:", error);
+          let errorMessage =
+            "Failed to load documents. Please try again later.";
+
+          // Provide more specific error messages based on error code
+          if (error.code === "PGRST116") {
+            errorMessage =
+              "The documents table doesn't exist. Please contact support.";
+          } else if (error.code === "42501") {
+            errorMessage =
+              "You don't have permission to access these documents.";
+          } else if (error.code === "23505") {
+            errorMessage = "There was a conflict with existing documents.";
+          } else if (error.message) {
+            errorMessage = `Error: ${error.message}`;
+          }
+
+          setError(errorMessage);
+          throw error;
+        }
+
+        console.log("Documents fetched:", data);
 
         if (data) {
           const formattedDocs: Document[] = data.map((doc: any) => ({
@@ -89,16 +298,22 @@ const DocumentManager = () => {
             name: doc.name,
             type: doc.type,
             uploadDate: new Date(doc.upload_date).toISOString().split("T")[0],
-            size: formatFileSize(doc.size),
+            size: documentUtils.formatFileSize(doc.size),
             status: doc.analysis_status || "none",
             fileUrl: doc.file_url,
           }));
 
           setDocuments(formattedDocs);
+        } else {
+          // Handle case where data is null but no error occurred
+          setDocuments([]);
         }
       } catch (err) {
         console.error("Error fetching documents:", err);
-        setError("Failed to load documents. Please try again later.");
+        // Only set a generic error if one hasn't been set already
+        if (!error) {
+          setError("Failed to load documents. Please try again later.");
+        }
         // Set empty documents array if fetch fails
         setDocuments([]);
       } finally {
@@ -109,80 +324,122 @@ const DocumentManager = () => {
     fetchDocuments();
   }, [user]);
 
-  // Format file size helper function
-  const formatFileSize = (bytes: number): string => {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-  };
-
-  // Handle file upload
+  // Handle file upload with improved error handling
   const handleFileUpload = async (file: File, name: string, type: string) => {
-    if (!user || !file) return;
+    if (!user) {
+      console.error("User authentication missing", { user });
+      throw new Error(
+        "You must be logged in to upload files. Please refresh the page or log in again.",
+      );
+    }
+
+    if (!file) {
+      console.error("File missing in upload handler");
+      throw new Error(
+        "No file was provided for upload. Please select a file and try again.",
+      );
+    }
+
+    // Validate file size
+    const maxSizeBytes = 10 * 1024 * 1024; // 10MB
+    if (file.size > maxSizeBytes) {
+      throw new Error(
+        `File size exceeds the maximum limit of 10MB. Current size: ${(file.size / (1024 * 1024)).toFixed(2)}MB`,
+      );
+    }
+
+    // Validate file type
+    const allowedTypes = [".pdf", ".docx", ".doc", ".jpg", ".jpeg", ".png"];
+    const fileExtension = file.name
+      .substring(file.name.lastIndexOf("."))
+      .toLowerCase();
+    if (!allowedTypes.includes(fileExtension)) {
+      throw new Error(
+        `File type ${fileExtension} is not supported. Allowed types: ${allowedTypes.join(", ")}`,
+      );
+    }
 
     try {
       setIsUploading(true);
       setUploadProgress(0);
+      setUploadError(null);
+      console.log(
+        `Starting upload for file: ${file.name}, size: ${file.size} bytes`,
+      );
 
-      // Create a unique file path
-      const filePath = `documents/${user.id}/${Date.now()}_${file.name}`;
+      // Upload file to storage
+      const {
+        success,
+        fileUrl,
+        error: uploadError,
+      } = await documentUtils.uploadFile(file, user.id, setUploadProgress);
 
-      // Upload file to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("user-documents")
-        .upload(filePath, file, {
-          cacheControl: "3600",
-          upsert: false,
-          onUploadProgress: (progress) => {
-            setUploadProgress(
-              Math.round((progress.loaded / progress.total) * 100),
-            );
-          },
-        });
+      if (!success || !fileUrl) {
+        console.error("Upload failed:", uploadError);
+        const errorMessage =
+          uploadError instanceof Error
+            ? uploadError.message
+            : typeof uploadError === "object" && uploadError !== null
+              ? JSON.stringify(uploadError)
+              : "Upload failed: Could not store file";
+        throw new Error(errorMessage);
+      }
 
-      if (uploadError) throw uploadError;
-
-      // Get public URL for the file
-      const { data: urlData } = await supabase.storage
-        .from("user-documents")
-        .getPublicUrl(filePath);
+      console.log("File uploaded successfully to storage, URL:", fileUrl);
 
       // Create document record in the database
-      const { data, error } = await supabase
-        .from("documents")
-        .insert({
-          user_id: user.id,
-          name: name || file.name,
-          type: type,
-          size: file.size,
-          file_url: urlData.publicUrl,
-          upload_date: new Date().toISOString(),
-          analysis_status: "none",
-        })
-        .select()
-        .single();
+      const {
+        success: recordSuccess,
+        document: docRecord,
+        error: recordError,
+      } = await documentUtils.createDocumentRecord(
+        user.id,
+        name || file.name,
+        type,
+        file.size,
+        fileUrl,
+      );
 
-      if (error) throw error;
+      if (!recordSuccess) {
+        console.error("Failed to create document record:", recordError);
+        const errorMessage =
+          recordError instanceof Error
+            ? recordError.message
+            : typeof recordError === "object" && recordError !== null
+              ? JSON.stringify(recordError)
+              : "Failed to create document record in database";
+        throw new Error(errorMessage);
+      }
+
+      console.log("Document record created in database:", docRecord);
 
       // Add the new document to the state
       const newDoc: Document = {
-        id: data.id,
-        name: data.name,
-        type: data.type,
-        uploadDate: new Date(data.upload_date).toISOString().split("T")[0],
-        size: formatFileSize(data.size),
+        id: docRecord.id,
+        name: docRecord.name,
+        type: docRecord.type,
+        uploadDate: new Date(docRecord.upload_date).toISOString().split("T")[0],
+        size: documentUtils.formatFileSize(docRecord.size),
         status: "none",
-        fileUrl: data.file_url,
+        fileUrl: docRecord.file_url,
       };
 
-      setDocuments([newDoc, ...documents]);
+      setDocuments((prevDocs) => [newDoc, ...prevDocs]);
+      console.log("Document added to UI state");
       return newDoc;
     } catch (err) {
       console.error("Error uploading document:", err);
+      // Set the error message for display in the UI
+      setUploadError(
+        err instanceof Error
+          ? err.message
+          : "An unexpected error occurred during upload",
+      );
       throw err;
     } finally {
       setIsUploading(false);
-      setUploadProgress(0);
+      setUploadProgress(100);
+      console.log("Upload process completed");
     }
   };
 
@@ -299,42 +556,99 @@ const DocumentManager = () => {
               </DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              <label
-                htmlFor="file-upload"
-                className="border-2 border-dashed rounded-lg p-12 text-center cursor-pointer hover:bg-muted/50 transition-colors"
-              >
-                <div className="flex flex-col items-center gap-2">
-                  <Upload className="h-10 w-10 text-muted-foreground" />
-                  <p className="font-medium">Drag and drop your file here</p>
-                  <p className="text-sm text-muted-foreground">
-                    or click to browse files
-                  </p>
-                  <Input
+              <div className="space-y-4">
+                {/* File Upload Area */}
+                <div className="relative">
+                  <input
                     type="file"
                     className="hidden"
                     id="file-upload"
+                    accept=".pdf,.docx,.doc,.jpg,.jpeg,.png"
                     onChange={async (e) => {
                       const file = e.target.files?.[0];
                       if (file) {
                         try {
-                          const fileType = file.name.endsWith(".pdf")
-                            ? "Contract"
-                            : file.name.endsWith(".docx")
-                              ? "Review"
-                              : "Document";
-                          await handleFileUpload(file, file.name, fileType);
-                          // Close dialog after successful upload
-                          document
-                            .querySelector('[role="dialog"]')
-                            ?.querySelector('button[aria-label="Close"]')
-                            ?.click();
+                          setSelectedFile(file);
+
+                          // Update the dialog button to say "Upload File"
+                          const dialogFooter = document.querySelector(
+                            '[role="dialog"] [data-dialog-footer]',
+                          );
+                          if (dialogFooter) {
+                            const uploadButton =
+                              dialogFooter.querySelector("button:last-child");
+                            if (uploadButton) {
+                              uploadButton.textContent = "Upload File";
+                              uploadButton.setAttribute(
+                                "data-upload-button",
+                                "true",
+                              );
+                            }
+                          }
                         } catch (err) {
-                          alert("Upload failed. Please try again.");
+                          console.error("File selection error:", err);
+                          setUploadError(
+                            "Failed to select file. Please try again.",
+                          );
                         }
                       }
                     }}
                   />
+
+                  {!selectedFile ? (
+                    <label
+                      htmlFor="file-upload"
+                      className="border-2 border-dashed rounded-lg p-12 text-center cursor-pointer hover:bg-muted/50 transition-colors flex flex-col items-center justify-center"
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <Upload className="h-10 w-10 text-muted-foreground" />
+                        <p className="font-medium">
+                          Drag and drop your file here
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          or click to browse files
+                        </p>
+                      </div>
+                    </label>
+                  ) : (
+                    <div className="border-2 border-dashed rounded-lg p-8 text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="bg-green-100 text-green-800 p-2 rounded-full">
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="24"
+                            height="24"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="h-6 w-6"
+                          >
+                            <polyline points="20 6 9 17 4 12"></polyline>
+                          </svg>
+                        </div>
+                        <p className="font-medium">{selectedFile.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {(selectedFile.size / 1024).toFixed(1)} KB
+                        </p>
+                        <Button
+                          variant="link"
+                          className="text-sm mt-2"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            document.getElementById("file-upload")?.click();
+                          }}
+                        >
+                          Change file
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {/* Upload Progress */}
                 {isUploading && (
                   <div className="mt-4">
                     <div className="w-full bg-muted rounded-full h-2.5">
@@ -346,7 +660,14 @@ const DocumentManager = () => {
                     <p className="text-sm mt-2">{uploadProgress}% Uploaded</p>
                   </div>
                 )}
-              </label>
+
+                {/* Error Message */}
+                {uploadError && (
+                  <div className="bg-red-50 border-l-4 border-red-400 p-3 rounded-md">
+                    <p className="text-sm text-red-700">{uploadError}</p>
+                  </div>
+                )}
+              </div>
               <div>
                 <p className="text-sm text-muted-foreground mb-2">
                   Supported file types: PDF, DOCX, JPG, PNG
@@ -356,9 +677,98 @@ const DocumentManager = () => {
                 </p>
               </div>
             </div>
-            <DialogFooter>
-              <Button variant="outline">Cancel</Button>
-              <Button>Upload</Button>
+            <DialogFooter data-dialog-footer>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // Reset state when canceling
+                  setSelectedFile(null);
+                  setUploadError(null);
+                  setUploadProgress(0);
+                  setIsUploading(false);
+
+                  // Close dialog
+                  document
+                    .querySelector('[role="dialog"]')
+                    ?.querySelector('button[aria-label="Close"]')
+                    ?.click();
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async (e) => {
+                  e.preventDefault();
+
+                  // If no file is selected, open file browser
+                  if (!selectedFile) {
+                    document.getElementById("file-upload")?.click();
+                    return;
+                  }
+
+                  // Otherwise, upload the selected file
+                  try {
+                    // Check if user is authenticated before attempting upload
+                    if (!user) {
+                      throw new Error(
+                        "You must be logged in to upload files. Please refresh the page or log in again.",
+                      );
+                    }
+
+                    setUploadError(null);
+                    setIsUploading(true);
+                    setUploadProgress(0);
+
+                    // Determine file type based on extension
+                    const fileType = selectedFile.name.endsWith(".pdf")
+                      ? "Contract"
+                      : selectedFile.name.endsWith(".docx") ||
+                          selectedFile.name.endsWith(".doc")
+                        ? "Review"
+                        : "Document";
+
+                    // Start the upload with progress tracking
+                    const uploadProgressInterval = setInterval(() => {
+                      setUploadProgress((prev) => {
+                        if (prev < 90) return prev + 10;
+                        return prev;
+                      });
+                    }, 300);
+
+                    await handleFileUpload(
+                      selectedFile,
+                      selectedFile.name,
+                      fileType,
+                    );
+
+                    // Clear the interval and set to 100%
+                    clearInterval(uploadProgressInterval);
+                    setUploadProgress(100);
+
+                    // Reset state and close dialog after successful upload
+                    setTimeout(() => {
+                      setSelectedFile(null);
+                      const closeButton = document
+                        .querySelector('[role="dialog"]')
+                        ?.querySelector('button[aria-label="Close"]');
+                      if (closeButton) {
+                        closeButton.click();
+                      }
+                    }, 500);
+                  } catch (err) {
+                    console.error("Upload error:", err);
+                    setUploadError(
+                      err instanceof Error
+                        ? err.message
+                        : "Upload failed. Please try again.",
+                    );
+                    setIsUploading(false);
+                    setUploadProgress(0);
+                  }
+                }}
+              >
+                {selectedFile ? "Upload File" : "Select File"}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

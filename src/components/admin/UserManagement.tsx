@@ -70,9 +70,13 @@ const UserManagement: React.FC = () => {
           throw new Error("Supabase client not properly initialized");
         }
 
+        console.log("Fetching users from Supabase...");
         const { data, error } = await supabase.from("users").select("*");
 
+        console.log("Supabase response:", { data, error });
+
         if (error) {
+          console.error("Supabase error details:", JSON.stringify(error));
           throw error;
         }
 
@@ -80,27 +84,38 @@ const UserManagement: React.FC = () => {
           throw new Error("No data returned from Supabase");
         }
 
-        // Transform the data to match the User interface
-        const transformedUsers: User[] = data.map((user: any) => ({
-          id: user.id,
-          name: user.name || user.email.split("@")[0],
-          email: user.email,
-          company: user.company || "Not specified",
-          role: user.role === "admin" ? UserRole.ADMIN : UserRole.USER,
-          status: user.is_active ? UserStatus.ACTIVE : UserStatus.INACTIVE,
-          planId: user.plan_id || "plan1",
-          createdAt: user.created_at,
-          lastLogin: user.last_sign_in_at || user.created_at,
-          wordCredits: {
-            remaining: user.word_credits_remaining || 0,
-            total: user.word_credits_total || 0,
-          },
-          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-        }));
+        console.log(`Successfully fetched ${data.length} users`);
 
+        // Transform the data to match the User interface
+        const transformedUsers: User[] = data.map((user: any) => {
+          const transformedUser = {
+            id: user.id,
+            name:
+              user.name || (user.email ? user.email.split("@")[0] : "Unknown"),
+            email: user.email || "no-email@example.com",
+            company: user.company || "Not specified",
+            role: user.role === "admin" ? UserRole.ADMIN : UserRole.USER,
+            status: user.is_active ? UserStatus.ACTIVE : UserStatus.INACTIVE,
+            planId: user.plan_id || "free",
+            createdAt: user.created_at || new Date().toISOString(),
+            lastLogin:
+              user.last_sign_in_at ||
+              user.created_at ||
+              new Date().toISOString(),
+            wordCredits: {
+              remaining: user.word_credits_remaining || 0,
+              total: user.word_credits_total || 0,
+            },
+            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
+          };
+          return transformedUser;
+        });
+
+        console.log("Transformed users:", transformedUsers);
         setUsers(transformedUsers);
       } catch (err: any) {
         console.error("Error fetching users:", err);
+        console.error("Error stack:", err.stack);
         setError(`Failed to load users: ${err.message || "Unknown error"}`);
       } finally {
         setIsLoading(false);
@@ -155,45 +170,77 @@ const UserManagement: React.FC = () => {
         word_credits_total: updatedUser.wordCredits.total,
       };
 
-      const { error } = await supabase
+      console.log("Updating user with data:", updateData);
+      console.log("User ID:", updatedUser.id);
+
+      const { data, error } = await supabase
         .from("users")
         .update(updateData)
-        .eq("id", updatedUser.id);
+        .eq("id", updatedUser.id)
+        .select();
 
-      if (error) throw error;
+      console.log("Update response:", { data, error });
+
+      if (error) {
+        console.error("Supabase update error details:", JSON.stringify(error));
+        throw error;
+      }
 
       // Update local state after successful update
       setUsers(
         users.map((user) => (user.id === updatedUser.id ? updatedUser : user)),
       );
+      console.log("User updated successfully");
     } catch (err: any) {
       console.error("Error updating user:", err);
+      console.error("Error stack:", err.stack);
       setError(`Failed to update user: ${err.message || "Unknown error"}`);
     }
   };
 
   const handleDeleteUser = async (userId: string) => {
     try {
-      const { error } = await supabase.from("users").delete().eq("id", userId);
+      console.log("Deleting user with ID:", userId);
 
-      if (error) throw error;
+      const { data, error } = await supabase
+        .from("users")
+        .delete()
+        .eq("id", userId)
+        .select();
+
+      console.log("Delete response:", { data, error });
+
+      if (error) {
+        console.error("Supabase delete error details:", JSON.stringify(error));
+        throw error;
+      }
 
       // Update local state after successful deletion
       setUsers(users.filter((user) => user.id !== userId));
-    } catch (err) {
+      console.log("User deleted successfully");
+    } catch (err: any) {
       console.error("Error deleting user:", err);
-      alert("Failed to delete user. Please try again.");
+      console.error("Error stack:", err.stack);
+      setError(`Failed to delete user: ${err.message || "Unknown error"}`);
     }
   };
 
   const handleSuspendUser = async (userId: string) => {
     try {
-      const { error } = await supabase
-        .from("users")
-        .update({ status: "suspended" })
-        .eq("id", userId);
+      console.log("Suspending user with ID:", userId);
 
-      if (error) throw error;
+      const { data, error } = await supabase
+        .from("users")
+        .update({ is_active: false }) // Using is_active instead of status to match the schema
+        .eq("id", userId)
+        .select();
+
+      console.log("Suspend response:", { data, error });
+
+      if (error) {
+        console.error("Supabase suspend error details:", JSON.stringify(error));
+        throw error;
+      }
 
       // Update local state after successful suspension
       setUsers(
@@ -201,9 +248,11 @@ const UserManagement: React.FC = () => {
           user.id === userId ? { ...user, status: UserStatus.SUSPENDED } : user,
         ),
       );
-    } catch (err) {
+      console.log("User suspended successfully");
+    } catch (err: any) {
       console.error("Error suspending user:", err);
-      alert("Failed to suspend user. Please try again.");
+      console.error("Error stack:", err.stack);
+      setError(`Failed to suspend user: ${err.message || "Unknown error"}`);
     }
   };
 

@@ -40,40 +40,66 @@ const AddUserDialog: React.FC<AddUserDialogProps> = ({ onUserAdded }) => {
       };
 
       console.log("Sending user data to Supabase:", userData);
+      console.log("Supabase client initialized:", !!supabase);
+      console.log("Supabase URL:", supabase.supabaseUrl);
 
       // Insert the new user into Supabase
-      const { data, error } = await supabase
-        .from("users")
-        .insert(userData)
-        .select()
-        .single();
+      try {
+        const response = await supabase
+          .from("users")
+          .insert(userData)
+          .select("*")
+          .single();
 
-      if (error) throw error;
+        const { data, error } = response;
 
-      if (!data) throw new Error("Failed to create user");
+        console.log("Insert response full details:", JSON.stringify(response));
+        console.log("Insert data:", data);
+        console.log("Insert error:", error);
 
-      // Create a new user with the form values and returned data
-      const newUser: User = {
-        id: data.id,
-        name: values.name,
-        email: values.email,
-        company: values.company || "Not specified",
-        role: values.role,
-        status: values.status,
-        planId: values.planId || "free",
-        createdAt: data.created_at || new Date().toISOString(),
-        lastLogin: data.last_sign_in_at || new Date().toISOString(),
-        wordCredits: values.wordCredits || { remaining: 0, total: 0 },
-        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${values.name.toLowerCase().replace(/\s+/g, "")}`,
-      };
+        if (error) {
+          console.error(
+            "Supabase insert error details:",
+            JSON.stringify(error),
+          );
+          throw error;
+        }
 
-      // Call the onUserAdded callback with the new user
-      onUserAdded(newUser);
+        if (!data) {
+          console.error("No data returned from insert operation");
+          throw new Error("Failed to create user: No data returned");
+        }
 
-      // Close the dialog
-      setOpen(false);
+        // Create a new user with the form values and returned data
+        const newUser: User = {
+          id: data.id,
+          name: values.name,
+          email: values.email,
+          company: values.company || "Not specified",
+          role: values.role,
+          status: values.status,
+          planId: values.planId || "free",
+          createdAt: data.created_at || new Date().toISOString(),
+          lastLogin: data.last_sign_in_at || new Date().toISOString(),
+          wordCredits: values.wordCredits || { remaining: 0, total: 0 },
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${values.name.toLowerCase().replace(/\s+/g, "")}`,
+        };
+
+        console.log("New user created successfully:", newUser);
+
+        // Call the onUserAdded callback with the new user
+        onUserAdded(newUser);
+
+        // Close the dialog
+        setOpen(false);
+      } catch (insertError: any) {
+        console.error("Error during insert operation:", insertError);
+        console.error("Error stack:", insertError.stack);
+        throw new Error(`Insert operation failed: ${insertError.message}`);
+      }
     } catch (error: any) {
       console.error("Error adding user:", error);
+      console.error("Error stack:", error.stack);
       alert(`Failed to add user: ${error.message || "Unknown error"}`);
     } finally {
       setIsSubmitting(false);
@@ -87,7 +113,7 @@ const AddUserDialog: React.FC<AddUserDialogProps> = ({ onUserAdded }) => {
           <Plus className="mr-2 h-4 w-4" /> Add User
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Add New User</DialogTitle>
           <DialogDescription>

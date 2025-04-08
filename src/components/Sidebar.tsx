@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { LogOut, X, ChevronRight, ChevronDown } from "lucide-react";
+import {
+  LogOut,
+  X,
+  ChevronRight,
+  ChevronDown,
+  LayoutDashboard,
+  Bot,
+  FileText,
+  HeadsetIcon,
+  Building,
+  GraduationCap,
+  ShieldCheck,
+  Settings,
+  CreditCard,
+} from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import { useAuth } from "@/hooks/useSupabase";
 import { careerStages } from "./AIAssistant/data";
@@ -129,6 +143,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full justify-start"
             onClick={() => setActiveTab("dashboard")}
           >
+            <LayoutDashboard className="h-4 w-4 mr-2" />
             Dashboard
           </Button>
 
@@ -142,7 +157,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                 if (!expandedAIMenu) setActiveTab("ai-assistant");
               }}
             >
-              <span>AI Assistant</span>
+              <span>
+                <Bot className="h-4 w-4 mr-2 inline" /> AI HR assistants
+              </span>
               {expandedAIMenu ? (
                 <ChevronDown className="h-4 w-4 opacity-70" />
               ) : (
@@ -183,6 +200,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full justify-start"
             onClick={() => setActiveTab("documents")}
           >
+            <FileText className="h-4 w-4 mr-2" />
             Documents
           </Button>
           <Button
@@ -190,6 +208,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full justify-start"
             onClick={() => setActiveTab("support")}
           >
+            <HeadsetIcon className="h-4 w-4 mr-2" />
             Human Support
           </Button>
           <Button
@@ -197,6 +216,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full justify-start"
             onClick={() => setActiveTab("company")}
           >
+            <Building className="h-4 w-4 mr-2" />
             Company Hub
           </Button>
           <Button
@@ -204,6 +224,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full justify-start"
             onClick={() => setActiveTab("career-pathways")}
           >
+            <GraduationCap className="h-4 w-4 mr-2" />
             Career Pathways
           </Button>
         </div>
@@ -215,6 +236,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full justify-start"
             onClick={() => setActiveTab("privacy")}
           >
+            <ShieldCheck className="h-4 w-4 mr-2" />
             Privacy & Data
           </Button>
           <Button
@@ -222,6 +244,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full justify-start"
             onClick={() => setActiveTab("account-settings")}
           >
+            <Settings className="h-4 w-4 mr-2" />
             Account Settings
           </Button>
           <Button
@@ -229,6 +252,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             className="w-full justify-start"
             onClick={() => setActiveTab("pricing")}
           >
+            <CreditCard className="h-4 w-4 mr-2" />
             Plans
           </Button>
         </div>

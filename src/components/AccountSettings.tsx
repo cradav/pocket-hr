@@ -33,6 +33,13 @@ import {
   useElements,
 } from "@stripe/react-stripe-js";
 import { careerStages } from "./AIAssistant/data";
+import {
+  createCheckoutSession,
+  redirectToCheckout,
+  getCustomerPaymentMethods,
+  getCustomerBillingHistory,
+  cancelSubscription,
+} from "@/services/stripeService";
 
 // Initialize Stripe with your publishable key
 const stripePromise = loadStripe(
@@ -46,12 +53,6 @@ const PaymentForm = () => {
   const [processing, setProcessing] = useState(false);
   const [succeeded, setSucceeded] = useState(false);
   const { user } = useAuth();
-
-  // Import the Stripe service functions
-  const {
-    createCheckoutSession,
-    redirectToCheckout,
-  } = require("@/services/stripeService");
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -859,13 +860,10 @@ const AccountSettings = () => {
                         className="bg-primary text-primary-foreground hover:bg-primary/90"
                         onClick={async () => {
                           try {
-                            const {
-                              createCheckoutSession,
-                              redirectToCheckout,
-                            } = await import("@/services/stripeService");
                             const { sessionId, error } =
                               await createCheckoutSession(
                                 user?.id || "anonymous",
+                                "price_premium_monthly",
                               );
                             if (error || !sessionId) {
                               console.error(
@@ -957,8 +955,37 @@ const AccountSettings = () => {
                 </div>
               </CardContent>
               <CardFooter className="flex justify-between">
-                <Button variant="outline">Cancel Subscription</Button>
-                <Button>Manage Subscription</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (isPremium && user) {
+                      // In a real app, you would have the subscription ID stored
+                      const subscriptionId = "sub_123456";
+                      cancelSubscription(subscriptionId).then(({ error }) => {
+                        if (error) {
+                          console.error(
+                            "Error cancelling subscription:",
+                            error,
+                          );
+                        } else {
+                          // In a real app, you would update the UI to reflect the cancelled subscription
+                          console.log("Subscription cancelled successfully");
+                          // You might want to refresh the profile data here
+                        }
+                      });
+                    }
+                  }}
+                >
+                  Cancel Subscription
+                </Button>
+                <Button
+                  onClick={() => {
+                    // In a real app, this would redirect to a subscription management page
+                    console.log("Manage subscription clicked");
+                  }}
+                >
+                  Manage Subscription
+                </Button>
               </CardFooter>
             </Card>
           </TabsContent>

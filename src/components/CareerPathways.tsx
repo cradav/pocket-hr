@@ -19,6 +19,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { parseResume } from "@/services/resumeService";
+import { generateCareerPathways } from "@/services/aiService";
 import { CareerPathway, ResumeData, Role } from "@/types/career";
 import RoleDetails from "./RoleDetails";
 import ComparisonMatrix from "./CareerPathways/ComparisonMatrix";
@@ -84,20 +85,23 @@ const CareerPathways: React.FC<CareerPathwaysProps> = ({
     }
   };
 
-  // Generate career pathways
+  // Generate career pathways using AI
   const handleGeneratePathways = async () => {
     setIsLoading(true);
     setError(null);
     setShowConfirmation(false);
 
     try {
-      // In a real implementation, this would call a service to generate pathways
-      // For now, we'll use mock data
-      const mockPathways = getMockPathways();
-      setPathways(mockPathways);
-      setSelectedPathway(mockPathways[0].id);
+      if (!resumeData) {
+        throw new Error("Resume data is required");
+      }
 
-      // Simulate credit usage
+      // Call the AI service to generate pathways
+      const generatedPathways = await generateCareerPathways(resumeData);
+      setPathways(generatedPathways);
+      setSelectedPathway(generatedPathways[0].id);
+
+      // Track credit usage
       if (onWordUsage) {
         onWordUsage(CREDITS_REQUIRED);
       }
@@ -306,203 +310,6 @@ const CareerPathways: React.FC<CareerPathwaysProps> = ({
   );
 };
 
-// Mock data for demonstration purposes
-function getMockPathways(): CareerPathway[] {
-  return [
-    {
-      id: "vertical-1",
-      type: "vertical",
-      description: "Traditional promotion within your current field",
-      timeRequired: "6-12 months",
-      salaryChangeRange: "+10-20%",
-      riskLevel: "Low",
-      color: "#3b82f6", // blue
-      icon: "arrow-up",
-      roles: [
-        {
-          id: "role-1",
-          title: "Senior Marketing Manager",
-          description:
-            "Lead marketing campaigns and team strategy for product lines",
-          industry: "Technology",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 85000,
-            max: 110000,
-            currency: "$",
-          },
-          growthPotential: 12,
-          timeToAchieve: "6-12 months",
-          riskLevel: "Low",
-          matchScore: 8,
-        },
-        {
-          id: "role-2",
-          title: "Marketing Director",
-          description:
-            "Oversee all marketing functions and develop long-term strategy",
-          industry: "Technology",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 120000,
-            max: 150000,
-            currency: "$",
-          },
-          growthPotential: 10,
-          timeToAchieve: "12-24 months",
-          riskLevel: "Low",
-          matchScore: 7,
-        },
-        {
-          id: "role-3",
-          title: "Product Marketing Lead",
-          description:
-            "Develop and execute marketing strategies for specific products",
-          industry: "Technology",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 90000,
-            max: 115000,
-            currency: "$",
-          },
-          growthPotential: 15,
-          timeToAchieve: "6-12 months",
-          riskLevel: "Low",
-          matchScore: 9,
-        },
-      ],
-    },
-    {
-      id: "diagonal-1",
-      type: "diagonal",
-      description: "Skill-adjacent role across industries or functions",
-      timeRequired: "3-6 months",
-      salaryChangeRange: "+5-15%",
-      riskLevel: "Medium",
-      color: "#22c55e", // green
-      icon: "arrow-up-right",
-      roles: [
-        {
-          id: "role-4",
-          title: "UX Researcher",
-          description:
-            "Conduct user research to inform product design decisions",
-          industry: "Technology",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 80000,
-            max: 105000,
-            currency: "$",
-          },
-          growthPotential: 18,
-          timeToAchieve: "3-6 months",
-          riskLevel: "Medium",
-          matchScore: 7,
-        },
-        {
-          id: "role-5",
-          title: "Content Strategist",
-          description: "Develop content strategy and oversee content creation",
-          industry: "Media",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 75000,
-            max: 95000,
-            currency: "$",
-          },
-          growthPotential: 14,
-          timeToAchieve: "3-6 months",
-          riskLevel: "Medium",
-          matchScore: 8,
-        },
-        {
-          id: "role-6",
-          title: "Customer Success Manager",
-          description: "Ensure customer satisfaction and drive retention",
-          industry: "SaaS",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 70000,
-            max: 90000,
-            currency: "$",
-          },
-          growthPotential: 16,
-          timeToAchieve: "3-6 months",
-          riskLevel: "Medium",
-          matchScore: 6,
-        },
-      ],
-    },
-    {
-      id: "leap-1",
-      type: "leap",
-      description: "Radical career shift requiring retraining",
-      timeRequired: "1-2 years",
-      salaryChangeRange: "Variable",
-      riskLevel: "High",
-      color: "#f97316", // orange
-      icon: "rocket",
-      roles: [
-        {
-          id: "role-7",
-          title: "Data Scientist",
-          description: "Analyze complex data sets to inform business decisions",
-          industry: "Technology",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 95000,
-            max: 130000,
-            currency: "$",
-          },
-          growthPotential: 22,
-          timeToAchieve: "1-2 years",
-          riskLevel: "High",
-          matchScore: 5,
-        },
-        {
-          id: "role-8",
-          title: "Product Manager",
-          description: "Lead product development and strategy",
-          industry: "Technology",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 100000,
-            max: 140000,
-            currency: "$",
-          },
-          growthPotential: 20,
-          timeToAchieve: "1-2 years",
-          riskLevel: "High",
-          matchScore: 6,
-        },
-        {
-          id: "role-9",
-          title: "Sustainability Consultant",
-          description: "Advise organizations on sustainable business practices",
-          industry: "Consulting",
-          requiredSkills: [],
-          preferredSkills: [],
-          averageSalary: {
-            min: 85000,
-            max: 120000,
-            currency: "$",
-          },
-          growthPotential: 25,
-          timeToAchieve: "1-2 years",
-          riskLevel: "High",
-          matchScore: 4,
-        },
-      ],
-    },
-  ];
-}
+// This function has been moved to aiService.ts
 
 export default CareerPathways;

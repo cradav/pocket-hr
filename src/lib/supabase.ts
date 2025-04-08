@@ -153,5 +153,7 @@ const createMockClient = () => {
 
 // Create the client with valid credentials or use a mock client
 export const supabase = isValidUrl
-  ? createClient<Database>(supabaseUrl, supabaseAnonKey)
+  ? createClient<Database>(supabaseUrl, supabaseAnonKey, {
+      storageUrl: "https://dwhnysvvlrffwnhololy.supabase.co/storage/v1/s3",
+    })
   : (createMockClient() as any);

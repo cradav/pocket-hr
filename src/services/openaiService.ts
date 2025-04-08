@@ -1,4 +1,12 @@
 // OpenAI service for generating AI responses
+import OpenAI from "openai";
+
+// Initialize the OpenAI client
+export const openai = new OpenAI({
+  apiKey:
+    import.meta.env.VITE_OPENAI_API_KEY || process.env.VITE_OPENAI_API_KEY,
+  dangerouslyAllowBrowser: true,
+});
 
 export interface OpenAIResponse {
   content: string;

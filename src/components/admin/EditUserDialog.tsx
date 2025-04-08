@@ -57,7 +57,7 @@ const EditUserDialog = forwardRef<EditUserDialogRef, EditUserDialogProps>(
         <DialogTrigger asChild>
           {trigger || <Button variant="outline">Edit User</Button>}
         </DialogTrigger>
-        <DialogContent className="sm:max-w-[500px]">
+        <DialogContent className="sm:max-w-[500px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit User</DialogTitle>
             <DialogDescription>
