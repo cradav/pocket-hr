@@ -155,6 +155,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
       content: inputValue,
       sender: "user",
       timestamp: new Date(),
+      token_count: Math.ceil(inputValue.length / 4), // Approximate token count
+      created_at: new Date().toISOString(),
     };
 
     const updatedMessages = [...messages, userMessage];
@@ -211,6 +213,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                   content: inputValue,
                   sender: "user",
                   created_at: new Date().toISOString(),
+                  token_count: Math.ceil(inputValue.length / 4), // Approximate for user messages
                 });
 
                 // Update conversation last_updated timestamp
@@ -240,6 +243,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                   content: inputValue,
                   sender: "user",
                   created_at: new Date().toISOString(),
+                  token_count: Math.ceil(inputValue.length / 4), // Approximate for user messages
                 });
 
                 // Update the active conversation with the database ID
@@ -275,6 +279,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                   content: response.content,
                   sender: "ai",
                   timestamp: new Date(),
+                  token_count: response.tokenCount,
+                  created_at: new Date().toISOString(),
                 };
 
                 // Calculate words used and update credits if callback provided
@@ -322,7 +328,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                       content: response.content,
                       sender: "ai",
                       created_at: new Date().toISOString(),
-                      token_count: response.tokenCount,
+                      token_count: response.tokenCount, // Actual token count from OpenAI
                     });
                   }
                 } catch (dbError) {
@@ -735,7 +741,13 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
             id,
             title,
             last_updated,
-            messages:messages(id, content, sender, created_at)
+            messages:messages(
+              id, 
+              content, 
+              sender, 
+              created_at,
+              token_count
+            )
           `,
           )
           .eq("user_id", user.id)
@@ -755,6 +767,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
               content: msg.content,
               sender: msg.sender as "user" | "ai",
               timestamp: new Date(msg.created_at),
+              token_count: msg.token_count || 0,
+              created_at: msg.created_at,
             })),
           }));
 
