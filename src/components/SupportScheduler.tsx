@@ -42,6 +42,7 @@ import {
 import { format, addDays } from "date-fns";
 import { useAuth, useProfile } from "@/hooks/useSupabase";
 import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/lib/supabase";
 
 interface TimeSlot {
   id: string;
