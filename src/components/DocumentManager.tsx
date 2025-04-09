@@ -70,6 +70,19 @@ const documentUtils = {
 
       if (error) {
         console.error("Error listing buckets:", error);
+        
+        // If we can't list buckets, try to use the bucket directly anyway
+        // This could work if the bucket exists but user doesn't have list permissions
+        try {
+          const { data: testData } = await supabase.storage.from(bucketName).list();
+          if (testData) {
+            console.log(`Bucket '${bucketName}' seems to exist despite list error.`);
+            return true;
+          }
+        } catch (listErr) {
+          console.error(`Error testing bucket '${bucketName}' existence:`, listErr);
+        }
+        
         return false;
       }
 
@@ -84,35 +97,25 @@ const documentUtils = {
           bucketName,
           {
             public: true,
-            fileSizeLimit: 10485760, // 10MB limit
           },
         );
 
         if (createError) {
           console.error(`Error creating bucket '${bucketName}':`, createError);
+          
+          // Even if we can't create the bucket, check if it exists anyway
+          // The bucket might have been created by another user or in a migration
+          try {
+            const { data: testData } = await supabase.storage.from(bucketName).list();
+            if (testData) {
+              console.log(`Bucket '${bucketName}' seems to exist despite create error.`);
+              return true;
+            }
+          } catch (listErr) {
+            console.error(`Error testing bucket '${bucketName}' existence:`, listErr);
+          }
+          
           return false;
-        }
-
-        // Set bucket public policy
-        const { error: policyError } = await supabase.storage
-          .from(bucketName)
-          .createSignedUrl(
-            "test.txt", // Dummy file path
-            60, // 60 seconds
-            {
-              download: true,
-            },
-          );
-
-        if (
-          policyError &&
-          !policyError.message.includes("The resource was not found")
-        ) {
-          console.error(
-            `Error setting bucket policy for '${bucketName}':`,
-            policyError,
-          );
-          // Continue anyway, this is not critical
         }
 
         console.log(`Bucket '${bucketName}' created successfully.`);
@@ -123,6 +126,18 @@ const documentUtils = {
       return true;
     } catch (err) {
       console.error(`Error ensuring bucket '${bucketName}' exists:`, err);
+      
+      // Final attempt - try to use the bucket directly
+      try {
+        const { data: testData } = await supabase.storage.from(bucketName).list();
+        if (testData) {
+          console.log(`Bucket '${bucketName}' exists despite earlier errors.`);
+          return true;
+        }
+      } catch (listErr) {
+        console.error(`Final error testing bucket '${bucketName}' existence:`, listErr);
+      }
+      
       return false;
     }
   },
@@ -154,13 +169,6 @@ const documentUtils = {
         .upload(filePath, file, {
           cacheControl: "3600",
           upsert: false,
-          onUploadProgress: (progress) => {
-            const percentage = Math.round(
-              (progress.loaded / progress.total) * 100,
-            );
-            console.log(`Upload progress: ${percentage}%`);
-            if (onProgress) onProgress(percentage);
-          },
         });
 
       if (uploadError) {
@@ -200,19 +208,77 @@ const documentUtils = {
     try {
       console.log("Creating document record in database...");
 
+      // First attempt with full data structure
+      const payload = {
+        user_id: userId,
+        name: name,
+        type: type,
+        size: size,
+        file_url: fileUrl,
+        upload_date: new Date().toISOString(),
+        analysis_status: "none",
+      };
+
       const { data, error } = await supabase
         .from("documents")
-        .insert({
+        .insert(payload)
+        .select()
+        .single();
+
+      // If there's an error about missing columns, try a more conservative approach
+      if (error && error.code === "PGRST204") {
+        console.log("Schema mismatch detected, trying progressive fallbacks");
+        
+        // Try removing analysis_status first
+        let fallbackPayload = {
           user_id: userId,
           name: name,
           type: type,
           size: size,
           file_url: fileUrl,
           upload_date: new Date().toISOString(),
-          analysis_status: "none",
-        })
-        .select()
-        .single();
+        };
+        
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from("documents")
+          .insert(fallbackPayload)
+          .select()
+          .single();
+          
+        if (!fallbackError) {
+          console.log("Document created with fallback payload:", fallbackData);
+          return { success: true, document: fallbackData };
+        }
+        
+        // If still failing, try with just the essential fields
+        if (fallbackError && fallbackError.code === "PGRST204") {
+          console.log("Still having schema issues, trying essential fields only");
+          
+          // Essential fields only
+          const essentialPayload = {
+            user_id: userId,
+            name: name,
+            file_url: fileUrl,
+          };
+          
+          const { data: essentialData, error: essentialError } = await supabase
+            .from("documents")
+            .insert(essentialPayload)
+            .select()
+            .single();
+            
+          if (essentialError) {
+            console.error("Error creating document with essential fields:", essentialError);
+            return { success: false, error: essentialError };
+          }
+          
+          console.log("Document created with essential fields only:", essentialData);
+          return { success: true, document: essentialData };
+        }
+        
+        console.error("Error creating document with fallback payload:", fallbackError);
+        return { success: false, error: fallbackError };
+      }
 
       if (error) {
         console.error("Error creating document record:", error);
@@ -224,6 +290,82 @@ const documentUtils = {
     } catch (err) {
       console.error("Error creating document record:", err);
       return { success: false, error: err };
+    }
+  },
+
+  // Get a temporary URL for a file (valid for a short time)
+  getTemporaryFileUrl: async (
+    bucketName: string,
+    filePath: string
+  ): Promise<string | null> => {
+    try {
+      console.log(`Getting temporary URL for file: ${filePath}`);
+      const { data, error } = await supabase.storage
+        .from(bucketName)
+        .createSignedUrl(filePath, 60 * 60); // Valid for 1 hour
+
+      if (error) {
+        console.error("Error creating signed URL:", error);
+        return null;
+      }
+
+      if (!data || !data.signedUrl) {
+        console.error("No signed URL returned");
+        return null;
+      }
+
+      console.log("Temporary URL created:", data.signedUrl);
+      return data.signedUrl;
+    } catch (err) {
+      console.error("Error generating temporary URL:", err);
+      return null;
+    }
+  },
+
+  // Delete a file from storage
+  deleteStorageFile: async (
+    bucketName: string,
+    filePath: string
+  ): Promise<boolean> => {
+    try {
+      console.log(`Deleting file from storage: ${filePath}`);
+      const { error } = await supabase.storage.from(bucketName).remove([filePath]);
+
+      if (error) {
+        console.error("Error deleting file from storage:", error);
+        return false;
+      }
+
+      console.log("File deleted successfully from storage");
+      return true;
+    } catch (err) {
+      console.error("Error deleting file:", err);
+      return false;
+    }
+  },
+
+  // Extract file path from the full URL
+  extractFilePathFromUrl: (fileUrl: string): string | null => {
+    try {
+      // For URLs like https://dwhnysvvlrffwnhololy.supabase.co/storage/v1/object/public/phr-bucket/documents/user-id/timestamp_filename.jpg
+      // We need to extract: documents/user-id/timestamp_filename.jpg
+      
+      const url = new URL(fileUrl);
+      const pathParts = url.pathname.split('/');
+      
+      // Find the bucket name in the path
+      const bucketIndex = pathParts.findIndex(part => part === "public") + 1;
+      if (bucketIndex > 0 && bucketIndex < pathParts.length) {
+        // Skip the bucket name and join the rest
+        const filePath = pathParts.slice(bucketIndex + 1).join('/');
+        return filePath;
+      }
+      
+      console.error("Could not extract file path from URL:", fileUrl);
+      return null;
+    } catch (err) {
+      console.error("Error extracting file path from URL:", err);
+      return null;
     }
   },
 };
@@ -242,6 +384,7 @@ const DocumentManager = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [shouldRefreshDocs, setShouldRefreshDocs] = useState(false);
   const { user } = useAuth();
 
   // Log authentication state for debugging
@@ -322,11 +465,15 @@ const DocumentManager = () => {
         setDocuments([]);
       } finally {
         setIsLoading(false);
+        // Reset refresh flag after documents are loaded
+        if (shouldRefreshDocs) {
+          setShouldRefreshDocs(false);
+        }
       }
     };
 
     fetchDocuments();
-  }, [user]);
+  }, [user, shouldRefreshDocs]);
 
   // Handle file upload with improved error handling
   const handleFileUpload = async (file: File, name: string, type: string) => {
@@ -430,6 +577,10 @@ const DocumentManager = () => {
 
       setDocuments((prevDocs) => [newDoc, ...prevDocs]);
       console.log("Document added to UI state");
+      
+      // Signal that documents should be refreshed
+      setShouldRefreshDocs(true);
+      
       return newDoc;
     } catch (err) {
       console.error("Error uploading document:", err);
@@ -692,10 +843,12 @@ const DocumentManager = () => {
                   setIsUploading(false);
 
                   // Close dialog
-                  document
+                  const closeButton = document
                     .querySelector('[role="dialog"]')
-                    ?.querySelector('button[aria-label="Close"]')
-                    ?.click();
+                    ?.querySelector('button[aria-label="Close"]') as HTMLElement;
+                  if (closeButton) {
+                    closeButton.click();
+                  }
                 }}
               >
                 Cancel
@@ -739,7 +892,7 @@ const DocumentManager = () => {
                       });
                     }, 300);
 
-                    await handleFileUpload(
+                    const newDoc = await handleFileUpload(
                       selectedFile,
                       selectedFile.name,
                       fileType,
@@ -752,9 +905,15 @@ const DocumentManager = () => {
                     // Reset state and close dialog after successful upload
                     setTimeout(() => {
                       setSelectedFile(null);
+                      setIsUploading(false);
+                      
+                      // Trigger document list refresh
+                      setShouldRefreshDocs(true);
+                      
+                      // Close dialog automatically on success
                       const closeButton = document
                         .querySelector('[role="dialog"]')
-                        ?.querySelector('button[aria-label="Close"]');
+                        ?.querySelector('button[aria-label="Close"]') as HTMLElement;
                       if (closeButton) {
                         closeButton.click();
                       }
@@ -768,6 +927,7 @@ const DocumentManager = () => {
                     );
                     setIsUploading(false);
                     setUploadProgress(0);
+                    // Don't close dialog on error
                   }
                 }}
               >
@@ -887,10 +1047,28 @@ const DocumentManager = () => {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={(e) => {
+                                onClick={async (e) => {
                                   e.stopPropagation();
                                   if (doc.fileUrl) {
-                                    window.open(doc.fileUrl, "_blank");
+                                    try {
+                                      // Extract file path from URL
+                                      const filePath = documentUtils.extractFilePathFromUrl(doc.fileUrl);
+                                      if (!filePath) {
+                                        throw new Error("Could not extract file path from URL");
+                                      }
+                                      
+                                      // Get temporary URL for viewing
+                                      const tempUrl = await documentUtils.getTemporaryFileUrl("phr-bucket", filePath);
+                                      if (!tempUrl) {
+                                        throw new Error("Failed to generate temporary URL for viewing");
+                                      }
+                                      
+                                      // Open in new tab
+                                      window.open(tempUrl, "_blank");
+                                    } catch (err) {
+                                      console.error("Error viewing document:", err);
+                                      alert("Error viewing document. Please try again later.");
+                                    }
                                   }
                                 }}
                               >
@@ -899,15 +1077,33 @@ const DocumentManager = () => {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={(e) => {
+                                onClick={async (e) => {
                                   e.stopPropagation();
                                   if (doc.fileUrl) {
-                                    const link = document.createElement("a");
-                                    link.href = doc.fileUrl;
-                                    link.download = doc.name;
-                                    document.body.appendChild(link);
-                                    link.click();
-                                    document.body.removeChild(link);
+                                    try {
+                                      // Extract file path from URL
+                                      const filePath = documentUtils.extractFilePathFromUrl(doc.fileUrl);
+                                      if (!filePath) {
+                                        throw new Error("Could not extract file path from URL");
+                                      }
+                                      
+                                      // Get temporary URL for download
+                                      const tempUrl = await documentUtils.getTemporaryFileUrl("phr-bucket", filePath);
+                                      if (!tempUrl) {
+                                        throw new Error("Failed to generate temporary URL for download");
+                                      }
+                                      
+                                      // Create link and trigger download
+                                      const link = document.createElement("a");
+                                      link.href = tempUrl;
+                                      link.download = doc.name; // Set filename for download
+                                      document.body.appendChild(link);
+                                      link.click();
+                                      document.body.removeChild(link);
+                                    } catch (err) {
+                                      console.error("Error downloading document:", err);
+                                      alert("Error downloading document. Please try again later.");
+                                    }
                                   }
                                 }}
                               >
@@ -918,18 +1114,29 @@ const DocumentManager = () => {
                                 size="icon"
                                 onClick={async (e) => {
                                   e.stopPropagation();
-                                  if (
-                                    confirm(
-                                      "Are you sure you want to delete this document?",
-                                    )
-                                  ) {
+                                  
+                                  // Confirmation dialog
+                                  const confirmDelete = confirm(
+                                    "Are you sure you want to delete this document? This action cannot be undone."
+                                  );
+                                  
+                                  if (confirmDelete) {
                                     try {
+                                      // Delete from database first
                                       const { error } = await supabase
                                         .from("documents")
                                         .delete()
                                         .eq("id", doc.id);
 
                                       if (error) throw error;
+                                      
+                                      // If successful, delete from storage
+                                      if (doc.fileUrl) {
+                                        const filePath = documentUtils.extractFilePathFromUrl(doc.fileUrl);
+                                        if (filePath) {
+                                          await documentUtils.deleteStorageFile("phr-bucket", filePath);
+                                        }
+                                      }
 
                                       // Update local state
                                       setDocuments(
@@ -946,7 +1153,7 @@ const DocumentManager = () => {
                                         err,
                                       );
                                       alert(
-                                        "Failed to delete document. Please try again.",
+                                        "Failed to delete document. Please try again."
                                       );
                                     }
                                   }
@@ -1057,11 +1264,68 @@ const DocumentManager = () => {
                 </div>
               </CardContent>
               <CardFooter className="flex justify-between">
-                <Button variant="outline" className="gap-2">
+                <Button 
+                  variant="outline" 
+                  className="gap-2"
+                  onClick={async () => {
+                    if (selectedDocument?.fileUrl) {
+                      try {
+                        // Extract file path from URL
+                        const filePath = documentUtils.extractFilePathFromUrl(selectedDocument.fileUrl);
+                        if (!filePath) {
+                          throw new Error("Could not extract file path from URL");
+                        }
+                        
+                        // Get temporary URL for download
+                        const tempUrl = await documentUtils.getTemporaryFileUrl("phr-bucket", filePath);
+                        if (!tempUrl) {
+                          throw new Error("Failed to generate temporary URL for download");
+                        }
+                        
+                        // Create link and trigger download
+                        const link = document.createElement("a");
+                        link.href = tempUrl;
+                        link.download = selectedDocument.name;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                      } catch (err) {
+                        console.error("Error downloading document:", err);
+                        alert("Error downloading document. Please try again later.");
+                      }
+                    }
+                  }}
+                >
                   <Download className="h-4 w-4" />
                   Download
                 </Button>
-                <Button variant="outline" className="gap-2">
+                <Button 
+                  variant="outline" 
+                  className="gap-2"
+                  onClick={async () => {
+                    if (selectedDocument?.fileUrl) {
+                      try {
+                        // Extract file path from URL
+                        const filePath = documentUtils.extractFilePathFromUrl(selectedDocument.fileUrl);
+                        if (!filePath) {
+                          throw new Error("Could not extract file path from URL");
+                        }
+                        
+                        // Get temporary URL for viewing
+                        const tempUrl = await documentUtils.getTemporaryFileUrl("phr-bucket", filePath);
+                        if (!tempUrl) {
+                          throw new Error("Failed to generate temporary URL for viewing");
+                        }
+                        
+                        // Open in new tab
+                        window.open(tempUrl, "_blank");
+                      } catch (err) {
+                        console.error("Error viewing document:", err);
+                        alert("Error viewing document. Please try again later.");
+                      }
+                    }
+                  }}
+                >
                   <Eye className="h-4 w-4" />
                   Preview
                 </Button>
