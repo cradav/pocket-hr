@@ -11,17 +11,8 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
-// Create the Supabase client with site URL configuration
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: true,
-    flowType: 'pkce',
-    storageKey: 'pocket-hr-auth',
-    storage: window.localStorage
-  }
-});
+// Create the Supabase client
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 
 // Override console.error to prevent sensitive information from being logged
 const originalConsoleError = console.error;
