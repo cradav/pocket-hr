@@ -9,8 +9,22 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Missing environment variables");
 }
 
-// Create the Supabase client
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+// Create the Supabase client with proper auth configuration
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce',
+    storage: window.localStorage,
+    storageKey: 'pocket-hr-auth'
+  },
+  global: {
+    headers: {
+      'x-client-info': 'pocket-hr'
+    }
+  }
+});
 
 // Override console.error to prevent sensitive information from being logged
 const originalConsoleError = console.error;
