@@ -12,8 +12,12 @@ const ERROR_MESSAGES = {
   UNKNOWN: "An unexpected error occurred",
   NOT_AUTHENTICATED: "No user logged in",
   VALIDATION: "User validation error",
-  INVALID_CREDENTIALS: "Invalid email or password"
+  INVALID_CREDENTIALS: "Invalid email or password",
 };
+
+export function useSupabase() {
+  return { supabase };
+}
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -100,7 +104,7 @@ export function useAuth() {
       logger.error(ERROR_MESSAGES.AUTH);
       return {
         data: null,
-        error: new Error(ERROR_MESSAGES.AUTH)
+        error: new Error(ERROR_MESSAGES.AUTH),
       };
     }
   };
@@ -121,18 +125,16 @@ export function useAuth() {
       if (authError) return { data: null, error: authError };
 
       if (authData.user) {
-        const { error: profileError } = await supabase
-          .from('users')
-          .insert({
-            id: authData.user.id,
-            email: authData.user.email,
-            name: userData.name,
-            company: userData.company || null,
-            role: 'user',
-            is_active: true,
-            word_credits_remaining: 1000,
-            word_credits_total: 1000
-          });
+        const { error: profileError } = await supabase.from("users").insert({
+          id: authData.user.id,
+          email: authData.user.email,
+          name: userData.name,
+          company: userData.company || null,
+          role: "user",
+          is_active: true,
+          word_credits_remaining: 1000,
+          word_credits_total: 1000,
+        });
 
         if (profileError) {
           logger.error(ERROR_MESSAGES.DATABASE, profileError);
@@ -193,7 +195,7 @@ export function useAuth() {
     } catch (err) {
       logger.error(ERROR_MESSAGES.AUTH, err);
       return {
-        error: new Error(ERROR_MESSAGES.AUTH)
+        error: new Error(ERROR_MESSAGES.AUTH),
       };
     }
   };
@@ -292,16 +294,43 @@ export function useProfile() {
       if (!supabase) {
         throw new Error("Supabase client not initialized");
       }
+
+      // Log the update attempt and data being sent
+      console.log("Updating profile with data:", updates);
+
       const { data, error } = await supabase
         .from("users")
         .update(updates)
         .eq("id", user.id)
-        .select()
-        .single();
+        .select();
 
-      if (error) throw error;
-      setProfile(data);
-      return { data, error: null };
+      if (error) {
+        console.error("Supabase update error:", error);
+        throw error;
+      }
+
+      // If no data is returned but also no error, try to fetch the updated profile
+      if (!data || data.length === 0) {
+        const { data: refreshedData, error: refreshError } = await supabase
+          .from("users")
+          .select("*")
+          .eq("id", user.id)
+          .single();
+
+        if (refreshError) {
+          console.error("Error fetching updated profile:", refreshError);
+          throw refreshError;
+        }
+
+        setProfile(refreshedData);
+        return { data: refreshedData, error: null };
+      }
+
+      // Update the local profile state with the returned data
+      const updatedProfile = Array.isArray(data) ? data[0] : data;
+      setProfile(updatedProfile);
+      console.log("Profile updated successfully:", updatedProfile);
+      return { data: updatedProfile, error: null };
     } catch (error) {
       console.error("Error updating profile:", error);
       return { data: null, error };
@@ -322,17 +351,27 @@ export function useProfile() {
         throw new Error("Supabase client not initialized");
       }
 
+      console.log("Updating privacy settings with:", updatedSettings);
+
       // Update the privacy_settings field in the users table
       const { data, error } = await supabase
         .from("users")
         .update({ privacy_settings: updatedSettings })
         .eq("id", user.id)
-        .select()
-        .single();
+        .select();
 
-      if (error) throw error;
-      setProfile(data);
-      return { data, error: null };
+      if (error) {
+        console.error("Error updating privacy settings in Supabase:", error);
+        throw error;
+      }
+
+      // If data is returned, update the profile state
+      if (data && data.length > 0) {
+        setProfile(data[0]);
+      }
+
+      console.log("Privacy settings updated successfully");
+      return { data: data ? data[0] : null, error: null };
     } catch (error) {
       console.error("Error updating privacy settings:", error);
       return { data: null, error };

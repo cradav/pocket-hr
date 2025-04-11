@@ -26,6 +26,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/useSupabase";
 import { Linkedin, Mail, Github } from "lucide-react";
 import { logger } from "@/utils/logger";
+import ForgotPasswordDialog from "./ForgotPasswordDialog";
 
 const loginSchema = z.object({
   email: z.string().email({ message: "Please enter a valid email address" }),
@@ -52,6 +53,7 @@ export default function AuthForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetEmailSent, setResetEmailSent] = useState(false);
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const navigate = useNavigate();
   const {
     signIn,
@@ -80,33 +82,6 @@ export default function AuthForm() {
     },
   });
 
-  const handleForgotPassword = async () => {
-    const email = loginForm.getValues("email");
-    if (!email) {
-      setError("Please enter your email address first");
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const { error } = await resetPassword(email);
-
-      if (error) {
-        setError(error.message);
-        return;
-      }
-
-      setResetEmailSent(true);
-    } catch (err) {
-      setError("An unexpected error occurred. Please try again.");
-      console.error("Unexpected error during password reset:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const onLoginSubmit = async (values: LoginFormValues) => {
     setIsLoading(true);
     setError(null);
@@ -116,8 +91,12 @@ export default function AuthForm() {
       const response = await signIn(values.email, values.password);
 
       if (response.error) {
-        if (response.error.message.includes("Supabase client not initialized")) {
-          setError("Unable to connect to authentication service. Please check your connection or try again later.");
+        if (
+          response.error.message.includes("Supabase client not initialized")
+        ) {
+          setError(
+            "Unable to connect to authentication service. Please check your connection or try again later.",
+          );
         } else {
           setError("Invalid email or password");
         }
@@ -150,7 +129,9 @@ export default function AuthForm() {
 
       if (error) {
         if (error.message.includes("Supabase client not initialized")) {
-          setError("Unable to connect to authentication service. Please check your connection or try again later.");
+          setError(
+            "Unable to connect to authentication service. Please check your connection or try again later.",
+          );
         } else {
           setError("Registration failed. Please try again.");
         }
@@ -172,280 +153,286 @@ export default function AuthForm() {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto">
-      <Tabs
-        value={activeTab}
-        onValueChange={(value) => setActiveTab(value as "login" | "register")}
-      >
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="login">Login</TabsTrigger>
-          <TabsTrigger value="register">Register</TabsTrigger>
-        </TabsList>
+    <>
+      <ForgotPasswordDialog
+        open={forgotPasswordOpen}
+        onOpenChange={setForgotPasswordOpen}
+      />
+      <Card className="w-full max-w-md mx-auto">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => setActiveTab(value as "login" | "register")}
+        >
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="login">Login</TabsTrigger>
+            <TabsTrigger value="register">Register</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="login">
-          <CardHeader>
-            <CardTitle>Login to Pocket.HR</CardTitle>
-            <CardDescription>
-              Enter your credentials to access your account
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Form {...loginForm}>
-              <form
-                onSubmit={loginForm.handleSubmit(onLoginSubmit)}
-                className="space-y-4"
-              >
-                <FormField
-                  control={loginForm.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="your.email@example.com"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+          <TabsContent value="login">
+            <CardHeader>
+              <CardTitle>Login to Pocket.HR</CardTitle>
+              <CardDescription>
+                Enter your credentials to access your account
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...loginForm}>
+                <form
+                  onSubmit={loginForm.handleSubmit(onLoginSubmit)}
+                  className="space-y-4"
+                >
+                  <FormField
+                    control={loginForm.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="your.email@example.com"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={loginForm.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Password</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="password"
+                            placeholder="••••••••"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {error && (
+                    <div className="text-sm text-destructive">{error}</div>
                   )}
-                />
 
-                <FormField
-                  control={loginForm.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Password</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="password"
-                          placeholder="••••••••"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+                  {resetEmailSent && (
+                    <div className="text-sm text-green-600">
+                      Password reset email sent. Please check your inbox.
+                    </div>
                   )}
-                />
 
-                {error && (
-                  <div className="text-sm text-destructive">{error}</div>
-                )}
-
-                {resetEmailSent && (
-                  <div className="text-sm text-green-600">
-                    Password reset email sent. Please check your inbox.
-                  </div>
-                )}
-
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Signing in..." : "Sign In with Email"}
-                </Button>
-
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <Separator className="w-full" />
-                  </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-background px-2 text-muted-foreground">
-                      Or continue with
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => signInWithGoogle()}
-                    disabled={isLoading}
-                  >
-                    <Github className="mr-2 h-4 w-4" />
-                    Google
+                  <Button type="submit" className="w-full" disabled={isLoading}>
+                    {isLoading ? "Signing in..." : "Sign In with Email"}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => signInWithLinkedIn()}
-                    disabled={isLoading}
-                  >
-                    <Linkedin className="mr-2 h-4 w-4" />
-                    LinkedIn
-                  </Button>
-                </div>
-              </form>
-            </Form>
-          </CardContent>
-          <CardFooter className="flex flex-col space-y-2">
-            <div className="text-sm text-muted-foreground text-center">
-              <button
-                onClick={() => handleForgotPassword()}
-                className="text-primary hover:underline"
-              >
-                Forgot password?
-              </button>
-            </div>
-            <div className="text-sm text-muted-foreground text-center">
-              Don't have an account?{" "}
-              <button
-                onClick={() => setActiveTab("register")}
-                className="text-primary hover:underline"
-              >
-                Register
-              </button>
-            </div>
-          </CardFooter>
-        </TabsContent>
 
-        <TabsContent value="register">
-          <CardHeader>
-            <CardTitle>Create an Account</CardTitle>
-            <CardDescription>
-              Join Pocket.HR for AI-driven HR support
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Form {...registerForm}>
-              <form
-                onSubmit={registerForm.handleSubmit(onRegisterSubmit)}
-                className="space-y-4"
-              >
-                <FormField
-                  control={registerForm.control}
-                  name="name"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Full Name</FormLabel>
-                      <FormControl>
-                        <Input placeholder="John Doe" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={registerForm.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="your.email@example.com"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={registerForm.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Password</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="password"
-                          placeholder="••••••••"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={registerForm.control}
-                  name="company"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Company (Optional)</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Acme Inc" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={registerForm.control}
-                  name="title"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Job Title (Optional)</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Software Engineer" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {error && (
-                  <div className="text-sm text-destructive">{error}</div>
-                )}
-
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading
-                    ? "Creating account..."
-                    : "Create Account with Email"}
-                </Button>
-
-                <div className="relative my-4">
-                  <div className="absolute inset-0 flex items-center">
-                    <Separator className="w-full" />
+                  <div className="relative my-4">
+                    <div className="absolute inset-0 flex items-center">
+                      <Separator className="w-full" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">
+                        Or continue with
+                      </span>
+                    </div>
                   </div>
-                  <div className="relative flex justify-center text-xs uppercase">
-                    <span className="bg-background px-2 text-muted-foreground">
-                      Or continue with
-                    </span>
-                  </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => signInWithGoogle()}
-                    disabled={isLoading}
-                  >
-                    <Github className="mr-2 h-4 w-4" />
-                    Google
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => signInWithGoogle()}
+                      disabled={isLoading}
+                    >
+                      <Github className="mr-2 h-4 w-4" />
+                      Google
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => signInWithLinkedIn()}
+                      disabled={isLoading}
+                    >
+                      <Linkedin className="mr-2 h-4 w-4" />
+                      LinkedIn
+                    </Button>
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+            <CardFooter className="flex flex-col space-y-2">
+              <div className="text-sm text-muted-foreground text-center">
+                <button
+                  onClick={() => setForgotPasswordOpen(true)}
+                  className="text-primary hover:underline"
+                >
+                  Forgot password?
+                </button>
+              </div>
+              <div className="text-sm text-muted-foreground text-center">
+                Don't have an account?{" "}
+                <button
+                  onClick={() => setActiveTab("register")}
+                  className="text-primary hover:underline"
+                >
+                  Register
+                </button>
+              </div>
+            </CardFooter>
+          </TabsContent>
+
+          <TabsContent value="register">
+            <CardHeader>
+              <CardTitle>Create an Account</CardTitle>
+              <CardDescription>
+                Join Pocket.HR for AI-driven HR support
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Form {...registerForm}>
+                <form
+                  onSubmit={registerForm.handleSubmit(onRegisterSubmit)}
+                  className="space-y-4"
+                >
+                  <FormField
+                    control={registerForm.control}
+                    name="name"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Full Name</FormLabel>
+                        <FormControl>
+                          <Input placeholder="John Doe" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={registerForm.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="your.email@example.com"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={registerForm.control}
+                    name="password"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Password</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="password"
+                            placeholder="••••••••"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={registerForm.control}
+                    name="company"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Company (Optional)</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Acme Inc" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={registerForm.control}
+                    name="title"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Job Title (Optional)</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Software Engineer" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {error && (
+                    <div className="text-sm text-destructive">{error}</div>
+                  )}
+
+                  <Button type="submit" className="w-full" disabled={isLoading}>
+                    {isLoading
+                      ? "Creating account..."
+                      : "Create Account with Email"}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => signInWithLinkedIn()}
-                    disabled={isLoading}
-                  >
-                    <Linkedin className="mr-2 h-4 w-4" />
-                    LinkedIn
-                  </Button>
-                </div>
-              </form>
-            </Form>
-          </CardContent>
-          <CardFooter className="flex flex-col space-y-2">
-            <div className="text-sm text-muted-foreground text-center">
-              Already have an account?{" "}
-              <button
-                onClick={() => setActiveTab("login")}
-                className="text-primary hover:underline"
-              >
-                Sign in
-              </button>
-            </div>
-          </CardFooter>
-        </TabsContent>
-      </Tabs>
-    </Card>
+
+                  <div className="relative my-4">
+                    <div className="absolute inset-0 flex items-center">
+                      <Separator className="w-full" />
+                    </div>
+                    <div className="relative flex justify-center text-xs uppercase">
+                      <span className="bg-background px-2 text-muted-foreground">
+                        Or continue with
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => signInWithGoogle()}
+                      disabled={isLoading}
+                    >
+                      <Github className="mr-2 h-4 w-4" />
+                      Google
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => signInWithLinkedIn()}
+                      disabled={isLoading}
+                    >
+                      <Linkedin className="mr-2 h-4 w-4" />
+                      LinkedIn
+                    </Button>
+                  </div>
+                </form>
+              </Form>
+            </CardContent>
+            <CardFooter className="flex flex-col space-y-2">
+              <div className="text-sm text-muted-foreground text-center">
+                Already have an account?{" "}
+                <button
+                  onClick={() => setActiveTab("login")}
+                  className="text-primary hover:underline"
+                >
+                  Sign in
+                </button>
+              </div>
+            </CardFooter>
+          </TabsContent>
+        </Tabs>
+      </Card>
+    </>
   );
 }

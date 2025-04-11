@@ -20,9 +20,17 @@ import {
   ExternalLink,
   Clock,
   AlertCircle,
+  RefreshCw,
+  Building,
 } from "lucide-react";
-import { fetchCompanyNews } from "../services/newsService";
+import NewsDisplay from "./CompanyHub/NewsDisplay";
+import {
+  fetchCompanyNews,
+  shouldRefreshNews,
+  updateLastRefreshTime,
+} from "../services/newsService";
 import { supabase } from "@/lib/supabase";
+import { useAuth, useProfile } from "@/hooks/useSupabase";
 
 interface NewsArticle {
   id: string;
@@ -43,8 +51,10 @@ interface Policy {
 }
 
 const CompanyHub = () => {
+  const { user } = useAuth();
+  const { profile, loading: profileLoading } = useProfile();
   const [activeTab, setActiveTab] = useState("companyNews");
-  const [companyName, setCompanyName] = useState("Acme Corporation");
+  const [companyName, setCompanyName] = useState("");
   const [publicNews, setPublicNews] = useState<NewsArticle[]>([]);
   const [isLoadingNews, setIsLoadingNews] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -55,18 +65,32 @@ const CompanyHub = () => {
   const [isLoadingPolicies, setIsLoadingPolicies] = useState(false);
   const [policyError, setPolicyError] = useState<string | null>(null);
 
-  // Fetch internal news articles from Supabase
+  // Set company name from user profile
+  useEffect(() => {
+    if (profile && profile.company) {
+      setCompanyName(profile.company);
+    } else if (!profileLoading && !profile?.company) {
+      setCompanyName("Acme Corporation"); // Default fallback
+    }
+  }, [profile, profileLoading]);
+
+  // Fetch internal news articles from Supabase for the user's company
   useEffect(() => {
     const fetchInternalNews = async () => {
+      if (!companyName) return;
+
       try {
-        const { data, error } = await supabase
+        const query = supabase
           .from("company_news")
           .select("*")
           .order("published_at", { ascending: false });
 
+        // Filter by company name if available
+        const { data, error } = await query.eq("company_name", companyName);
+
         if (error) throw error;
 
-        if (data) {
+        if (data && data.length > 0) {
           setNewsArticles(
             data.map((item: any) => ({
               id: item.id,
@@ -78,6 +102,30 @@ const CompanyHub = () => {
               url: item.url || "#",
             })),
           );
+        } else {
+          // If no company-specific news found, set default news
+          setNewsArticles([
+            {
+              id: "1",
+              title: `${companyName} Announces New Remote Work Policy`,
+              summary: `Effective next month, all employees at ${companyName} will have the option to work remotely up to 3 days per week.`,
+              published_at: new Date().toISOString().split("T")[0],
+              source: "Company Intranet",
+              category: "Policy Update",
+              url: "#",
+            },
+            {
+              id: "2",
+              title: `Annual Performance Review Process Changes at ${companyName}`,
+              summary: `HR department announces simplified performance review process with quarterly check-ins.`,
+              published_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                .toISOString()
+                .split("T")[0],
+              source: "HR Newsletter",
+              category: "HR Update",
+              url: "#",
+            },
+          ]);
         }
       } catch (err) {
         console.error("Error fetching internal news:", err);
@@ -85,20 +133,20 @@ const CompanyHub = () => {
         setNewsArticles([
           {
             id: "1",
-            title: "Company Announces New Remote Work Policy",
-            summary:
-              "Effective next month, all employees will have the option to work remotely up to 3 days per week.",
-            published_at: "2023-06-15",
+            title: `${companyName} Announces New Remote Work Policy`,
+            summary: `Effective next month, all employees at ${companyName} will have the option to work remotely up to 3 days per week.`,
+            published_at: new Date().toISOString().split("T")[0],
             source: "Company Intranet",
             category: "Policy Update",
             url: "#",
           },
           {
             id: "2",
-            title: "Annual Performance Review Process Changes",
-            summary:
-              "HR department announces simplified performance review process with quarterly check-ins.",
-            published_at: "2023-05-28",
+            title: `Annual Performance Review Process Changes at ${companyName}`,
+            summary: `HR department announces simplified performance review process with quarterly check-ins.`,
+            published_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+              .toISOString()
+              .split("T")[0],
             source: "HR Newsletter",
             category: "HR Update",
             url: "#",
@@ -107,8 +155,10 @@ const CompanyHub = () => {
       }
     };
 
-    fetchInternalNews();
-  }, []);
+    if (companyName) {
+      fetchInternalNews();
+    }
+  }, [companyName]);
 
   // Fetch company policies from Supabase
   useEffect(() => {
@@ -169,26 +219,94 @@ const CompanyHub = () => {
     fetchPolicies();
   }, [activeTab]);
 
+  // Function to schedule the next news update at 6AM PST
+  const scheduleNextNewsUpdate = () => {
+    const now = new Date();
+
+    // Convert to PST for scheduling (UTC-8)
+    const pstOffset = -8; // Standard PST offset from UTC
+    const nowPST = new Date(
+      now.getTime() + now.getTimezoneOffset() * 60000 + pstOffset * 3600000,
+    );
+
+    // Set target time to 6AM PST today
+    const targetTime = new Date(nowPST);
+    targetTime.setHours(6, 0, 0, 0);
+
+    // If it's already past 6AM, schedule for tomorrow
+    if (nowPST > targetTime) {
+      targetTime.setDate(targetTime.getDate() + 1);
+    }
+
+    // Calculate milliseconds until next 6AM PST
+    const msUntilTarget = targetTime.getTime() - nowPST.getTime();
+
+    console.log(
+      `Scheduling next news update in ${Math.round(msUntilTarget / 1000 / 60)} minutes`,
+    );
+
+    // Set timeout for the next update
+    const timerId = setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        // Only refresh if the page is visible
+        refreshCompanyNews(true);
+      }
+      // Schedule the next update
+      scheduleNextNewsUpdate();
+    }, msUntilTarget);
+
+    // Store the timer ID for cleanup
+    return timerId;
+  };
+
+  // Function to fetch company news
+  const refreshCompanyNews = async (isScheduledUpdate = false) => {
+    if (!isScheduledUpdate) {
+      // For manual refreshes, check if we should allow it
+      const shouldRefresh = await shouldRefreshNews(companyName, user?.id);
+
+      if (!shouldRefresh) {
+        setError(
+          "News is already up to date. Next refresh will be available tomorrow at 6AM PST.",
+        );
+        return;
+      }
+    }
+
+    setIsLoadingNews(true);
+    try {
+      setError(null);
+      const news = await fetchCompanyNews(
+        companyName,
+        isScheduledUpdate,
+        user?.id,
+      );
+      setPublicNews(news);
+    } catch (error) {
+      console.error("Error fetching public news:", error);
+      setPublicNews([]);
+      setError("Failed to fetch company news. Please try again later.");
+    } finally {
+      setIsLoadingNews(false);
+    }
+  };
+
   // Fetch public news about the company using the news service
   useEffect(() => {
-    const getCompanyNews = async () => {
-      setIsLoadingNews(true);
-      try {
-        setError(null);
-        const news = await fetchCompanyNews(companyName);
-        setPublicNews(news);
-      } catch (error) {
-        console.error("Error fetching public news:", error);
-        setPublicNews([]);
-        setError("Failed to fetch company news. Please try again later.");
-      } finally {
-        setIsLoadingNews(false);
-      }
-    };
+    let timerId: number | undefined;
 
     if (activeTab === "companyNews") {
-      getCompanyNews();
+      // Initial fetch
+      refreshCompanyNews();
+
+      // Schedule next update
+      timerId = scheduleNextNewsUpdate();
     }
+
+    // Cleanup function
+    return () => {
+      if (timerId) clearTimeout(timerId);
+    };
   }, [activeTab, companyName]);
 
   // Filter news articles based on search query
@@ -216,6 +334,12 @@ const CompanyHub = () => {
     <div className="bg-background w-full h-full p-6">
       <div className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight">Company Hub</h1>
+        {companyName && (
+          <div className="flex items-center mt-1 text-muted-foreground">
+            <Building className="h-4 w-4 mr-1" />
+            <span>{companyName}</span>
+          </div>
+        )}
         <p className="text-muted-foreground mt-2">
           Access company news and policy information
         </p>
@@ -272,174 +396,45 @@ const CompanyHub = () => {
                   </CardDescription>
                 </div>
                 <div className="flex items-center">
-                  <Input
-                    type="text"
-                    placeholder="Company name..."
-                    className="w-48 mr-2"
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                  />
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={() => {
                       if (activeTab === "companyNews") {
-                        setIsLoadingNews(true);
-                        setError(null);
-                        fetchCompanyNews(companyName)
-                          .then((news) => setPublicNews(news))
-                          .catch((err) => {
-                            console.error("Error fetching news:", err);
-                            setError(
-                              "Failed to fetch company news. Please try again later.",
-                            );
-                          })
-                          .finally(() => setIsLoadingNews(false));
+                        refreshCompanyNews();
                       }
                     }}
+                    className="flex items-center"
+                    disabled={isLoadingNews}
                   >
+                    <RefreshCw
+                      className={`h-4 w-4 mr-2 ${isLoadingNews ? "animate-spin" : ""}`}
+                    />
                     Refresh
                   </Button>
                 </div>
               </div>
             </CardHeader>
             <CardContent>
-              {isLoadingNews ? (
-                <div className="flex justify-center py-10">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                </div>
-              ) : error ? (
-                <div className="text-center py-10">
-                  <div className="flex flex-col items-center gap-2">
-                    <AlertCircle className="h-8 w-8 text-destructive" />
-                    <p className="text-destructive font-medium">{error}</p>
-                    <p className="text-sm text-muted-foreground">
-                      Please check your API key or try again later.
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-2"
-                      onClick={() => {
-                        if (activeTab === "companyNews") {
-                          setIsLoadingNews(true);
-                          fetchCompanyNews(companyName)
-                            .then((news) => {
-                              setPublicNews(news);
-                              setError(null);
-                            })
-                            .catch((err) => {
-                              console.error("Error retrying fetch:", err);
-                              setError(
-                                "Failed to fetch company news. Please try again later.",
-                              );
-                            })
-                            .finally(() => setIsLoadingNews(false));
-                        }
-                      }}
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                </div>
-              ) : filteredPublicNews.length > 0 ? (
-                <div className="space-y-4">
-                  {filteredPublicNews.map((article, index) => (
-                    <Card key={index}>
-                      <CardHeader className="pb-2">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <CardTitle>{article.title}</CardTitle>
-                            <div className="flex items-center mt-1 text-sm text-muted-foreground">
-                              <Clock className="mr-1 h-3 w-3" />
-                              {article.published_at}
-                              <span className="mx-2">•</span>
-                              {article.source}
-                            </div>
-                          </div>
-                          <Badge variant="secondary">{article.category}</Badge>
-                        </div>
-                      </CardHeader>
-                      <CardContent>
-                        <p className="text-sm">{article.summary}</p>
-                        <Button
-                          variant="link"
-                          className="p-0 h-auto mt-2 flex items-center"
-                          asChild
-                        >
-                          <a
-                            href={article.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            Read more <ExternalLink className="ml-1 h-3 w-3" />
-                          </a>
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-center py-10">
-                  <div className="flex flex-col items-center gap-2">
-                    <AlertCircle className="h-8 w-8 text-muted-foreground" />
-                    <p className="text-muted-foreground">
-                      No public news articles found for {companyName}.
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      Try changing the company name or check back later for
-                      updates.
-                    </p>
-                  </div>
-                </div>
-              )}
+              <NewsDisplay
+                isLoading={isLoadingNews}
+                error={error}
+                articles={filteredPublicNews}
+                onRetry={() => refreshCompanyNews()}
+                emptyMessage={`No public news articles found for ${companyName}.`}
+              />
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="news" className="space-y-4">
-          {filteredNews.length > 0 ? (
-            filteredNews.map((article) => (
-              <Card key={article.id}>
-                <CardHeader className="pb-2">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <CardTitle>{article.title}</CardTitle>
-                      <div className="flex items-center mt-1 text-sm text-muted-foreground">
-                        <Clock className="mr-1 h-3 w-3" />
-                        {article.published_at}
-                        <span className="mx-2">•</span>
-                        {article.source}
-                      </div>
-                    </div>
-                    <Badge variant="secondary">{article.category}</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm">{article.summary}</p>
-                  <Button
-                    variant="link"
-                    className="p-0 h-auto mt-2 flex items-center"
-                    asChild
-                  >
-                    <a
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Read more <ExternalLink className="ml-1 h-3 w-3" />
-                    </a>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))
-          ) : (
-            <div className="text-center py-10">
-              <p className="text-muted-foreground">
-                No news articles found matching your search.
-              </p>
-            </div>
-          )}
+          <NewsDisplay
+            isLoading={false}
+            error={null}
+            articles={filteredNews}
+            onRetry={() => {}}
+            emptyMessage="No news articles found matching your search."
+          />
         </TabsContent>
 
         <TabsContent value="policies" className="space-y-4">

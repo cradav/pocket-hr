@@ -11,14 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -27,9 +19,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Search,
   Upload,
@@ -37,11 +34,14 @@ import {
   Download,
   Eye,
   BarChart,
-  Trash2,
   Filter,
+  Edit,
+  Check,
+  X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useSupabase";
+import DocumentList from "./DocumentManager/DocumentList";
 
 interface Document {
   id: string;
@@ -70,19 +70,26 @@ const documentUtils = {
 
       if (error) {
         console.error("Error listing buckets:", error);
-        
+
         // If we can't list buckets, try to use the bucket directly anyway
         // This could work if the bucket exists but user doesn't have list permissions
         try {
-          const { data: testData } = await supabase.storage.from(bucketName).list();
+          const { data: testData } = await supabase.storage
+            .from(bucketName)
+            .list();
           if (testData) {
-            console.log(`Bucket '${bucketName}' seems to exist despite list error.`);
+            console.log(
+              `Bucket '${bucketName}' seems to exist despite list error.`,
+            );
             return true;
           }
         } catch (listErr) {
-          console.error(`Error testing bucket '${bucketName}' existence:`, listErr);
+          console.error(
+            `Error testing bucket '${bucketName}' existence:`,
+            listErr,
+          );
         }
-        
+
         return false;
       }
 
@@ -102,19 +109,26 @@ const documentUtils = {
 
         if (createError) {
           console.error(`Error creating bucket '${bucketName}':`, createError);
-          
+
           // Even if we can't create the bucket, check if it exists anyway
           // The bucket might have been created by another user or in a migration
           try {
-            const { data: testData } = await supabase.storage.from(bucketName).list();
+            const { data: testData } = await supabase.storage
+              .from(bucketName)
+              .list();
             if (testData) {
-              console.log(`Bucket '${bucketName}' seems to exist despite create error.`);
+              console.log(
+                `Bucket '${bucketName}' seems to exist despite create error.`,
+              );
               return true;
             }
           } catch (listErr) {
-            console.error(`Error testing bucket '${bucketName}' existence:`, listErr);
+            console.error(
+              `Error testing bucket '${bucketName}' existence:`,
+              listErr,
+            );
           }
-          
+
           return false;
         }
 
@@ -126,18 +140,23 @@ const documentUtils = {
       return true;
     } catch (err) {
       console.error(`Error ensuring bucket '${bucketName}' exists:`, err);
-      
+
       // Final attempt - try to use the bucket directly
       try {
-        const { data: testData } = await supabase.storage.from(bucketName).list();
+        const { data: testData } = await supabase.storage
+          .from(bucketName)
+          .list();
         if (testData) {
           console.log(`Bucket '${bucketName}' exists despite earlier errors.`);
           return true;
         }
       } catch (listErr) {
-        console.error(`Final error testing bucket '${bucketName}' existence:`, listErr);
+        console.error(
+          `Final error testing bucket '${bucketName}' existence:`,
+          listErr,
+        );
       }
-      
+
       return false;
     }
   },
@@ -228,7 +247,7 @@ const documentUtils = {
       // If there's an error about missing columns, try a more conservative approach
       if (error && error.code === "PGRST204") {
         console.log("Schema mismatch detected, trying progressive fallbacks");
-        
+
         // Try removing analysis_status first
         let fallbackPayload = {
           user_id: userId,
@@ -238,45 +257,56 @@ const documentUtils = {
           file_url: fileUrl,
           upload_date: new Date().toISOString(),
         };
-        
+
         const { data: fallbackData, error: fallbackError } = await supabase
           .from("documents")
           .insert(fallbackPayload)
           .select()
           .single();
-          
+
         if (!fallbackError) {
           console.log("Document created with fallback payload:", fallbackData);
           return { success: true, document: fallbackData };
         }
-        
+
         // If still failing, try with just the essential fields
         if (fallbackError && fallbackError.code === "PGRST204") {
-          console.log("Still having schema issues, trying essential fields only");
-          
+          console.log(
+            "Still having schema issues, trying essential fields only",
+          );
+
           // Essential fields only
           const essentialPayload = {
             user_id: userId,
             name: name,
             file_url: fileUrl,
           };
-          
+
           const { data: essentialData, error: essentialError } = await supabase
             .from("documents")
             .insert(essentialPayload)
             .select()
             .single();
-            
+
           if (essentialError) {
-            console.error("Error creating document with essential fields:", essentialError);
+            console.error(
+              "Error creating document with essential fields:",
+              essentialError,
+            );
             return { success: false, error: essentialError };
           }
-          
-          console.log("Document created with essential fields only:", essentialData);
+
+          console.log(
+            "Document created with essential fields only:",
+            essentialData,
+          );
           return { success: true, document: essentialData };
         }
-        
-        console.error("Error creating document with fallback payload:", fallbackError);
+
+        console.error(
+          "Error creating document with fallback payload:",
+          fallbackError,
+        );
         return { success: false, error: fallbackError };
       }
 
@@ -296,7 +326,7 @@ const documentUtils = {
   // Get a temporary URL for a file (valid for a short time)
   getTemporaryFileUrl: async (
     bucketName: string,
-    filePath: string
+    filePath: string,
   ): Promise<string | null> => {
     try {
       console.log(`Getting temporary URL for file: ${filePath}`);
@@ -325,11 +355,13 @@ const documentUtils = {
   // Delete a file from storage
   deleteStorageFile: async (
     bucketName: string,
-    filePath: string
+    filePath: string,
   ): Promise<boolean> => {
     try {
       console.log(`Deleting file from storage: ${filePath}`);
-      const { error } = await supabase.storage.from(bucketName).remove([filePath]);
+      const { error } = await supabase.storage
+        .from(bucketName)
+        .remove([filePath]);
 
       if (error) {
         console.error("Error deleting file from storage:", error);
@@ -349,18 +381,18 @@ const documentUtils = {
     try {
       // For URLs like https://dwhnysvvlrffwnhololy.supabase.co/storage/v1/object/public/phr-bucket/documents/user-id/timestamp_filename.jpg
       // We need to extract: documents/user-id/timestamp_filename.jpg
-      
+
       const url = new URL(fileUrl);
-      const pathParts = url.pathname.split('/');
-      
+      const pathParts = url.pathname.split("/");
+
       // Find the bucket name in the path
-      const bucketIndex = pathParts.findIndex(part => part === "public") + 1;
+      const bucketIndex = pathParts.findIndex((part) => part === "public") + 1;
       if (bucketIndex > 0 && bucketIndex < pathParts.length) {
         // Skip the bucket name and join the rest
-        const filePath = pathParts.slice(bucketIndex + 1).join('/');
+        const filePath = pathParts.slice(bucketIndex + 1).join("/");
         return filePath;
       }
-      
+
       console.error("Could not extract file path from URL:", fileUrl);
       return null;
     } catch (err) {
@@ -385,6 +417,10 @@ const DocumentManager = () => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [shouldRefreshDocs, setShouldRefreshDocs] = useState(false);
+  const [editingType, setEditingType] = useState(false);
+  const [newDocType, setNewDocType] = useState("");
+  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const { user } = useAuth();
 
   // Log authentication state for debugging
@@ -402,8 +438,8 @@ const DocumentManager = () => {
         setError("Failed to load documents: User not defined.");
         setIsLoading(false);
         return;
-      };
-      
+      }
+
       try {
         console.log("Fetching documents for user:", user.id);
         setIsLoading(true);
@@ -577,10 +613,10 @@ const DocumentManager = () => {
 
       setDocuments((prevDocs) => [newDoc, ...prevDocs]);
       console.log("Document added to UI state");
-      
+
       // Signal that documents should be refreshed
       setShouldRefreshDocs(true);
-      
+
       return newDoc;
     } catch (err) {
       console.error("Error uploading document:", err);
@@ -598,11 +634,42 @@ const DocumentManager = () => {
     }
   };
 
+  // Save document type changes
+  const saveDocumentType = async () => {
+    if (!user || !selectedDocument) return;
+
+    try {
+      // Update document type in the database
+      const { error } = await supabase
+        .from("documents")
+        .update({ type: newDocType })
+        .eq("id", selectedDocument.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setDocuments(
+        documents.map((doc) =>
+          doc.id === selectedDocument.id ? { ...doc, type: newDocType } : doc,
+        ),
+      );
+
+      // Update selected document
+      setSelectedDocument({ ...selectedDocument, type: newDocType });
+      setEditingType(false);
+    } catch (err) {
+      console.error("Error updating document type:", err);
+      alert("Failed to update document type. Please try again.");
+    }
+  };
+
   // Handle document analysis request
   const requestDocumentAnalysis = async (documentId: string) => {
     if (!user) return;
 
     try {
+      setIsAnalyzing(true);
+
       // Update document status to pending
       const { error } = await supabase
         .from("documents")
@@ -621,6 +688,13 @@ const DocumentManager = () => {
       if (selectedDocument && selectedDocument.id === documentId) {
         setSelectedDocument({ ...selectedDocument, status: "pending" });
       }
+
+      // Generate real analysis results based on document type
+      const docToAnalyze = documents.find((doc) => doc.id === documentId);
+      const analysisResults = await generateMockAnalysisResults(
+        docToAnalyze?.type || "Document",
+      );
+      setAnalysisResults(analysisResults);
 
       // In a real app, you would trigger an analysis job here
       // For demo purposes, we'll simulate analysis completion after a delay
@@ -643,21 +717,284 @@ const DocumentManager = () => {
           if (selectedDocument && selectedDocument.id === documentId) {
             setSelectedDocument({ ...selectedDocument, status: "analyzed" });
           }
+
+          setIsAnalyzing(false);
+          setShowAnalysisDialog(true);
         } catch (err) {
           console.error("Error completing document analysis:", err);
+          setIsAnalyzing(false);
         }
-      }, 5000); // Simulate 5 second analysis time
+      }, 3000); // Simulate 3 second analysis time
     } catch (err) {
       console.error("Error requesting document analysis:", err);
       alert("Failed to request document analysis. Please try again.");
+      setIsAnalyzing(false);
+    }
+  };
+
+  // Generate document analysis results using OpenAI
+  const generateMockAnalysisResults = async (docType: string) => {
+    try {
+      // Import the OpenAI service
+      const { generateOpenAIResponse } = await import(
+        "@/services/openaiService"
+      );
+
+      // Create a prompt based on document type
+      let prompt = `Analyze this ${docType} document and extract the following information:\n`;
+      prompt += `1. Document Type (be specific)\n`;
+      prompt += `2. Effective Date or Review Date\n`;
+      prompt += `3. Parties Involved\n`;
+      prompt += `4. Duration or Period (if applicable)\n`;
+      prompt += `5. A comprehensive summary (2-3 sentences)\n`;
+      prompt += `6. 3 Key Clauses or Sections with titles and content\n`;
+      prompt += `7. Any potential concerns or issues that should be addressed\n\n`;
+
+      // Add document type specific context
+      if (docType === "Contract") {
+        prompt += `This is an employment contract. Focus on compensation, termination conditions, non-compete clauses, and any restrictive covenants.`;
+      } else if (docType === "Review") {
+        prompt += `This is a performance review. Focus on achievements, areas for improvement, goals for next period, and overall rating.`;
+      } else if (docType === "Resume") {
+        prompt += `This is a resume/CV. Focus on skills, experience, education, certifications, and career highlights. Identify key strengths and potential skill gaps.`;
+      } else {
+        prompt += `This is a general document. Extract the most important information and highlight any actionable items.`;
+      }
+
+      // Call OpenAI API
+      const response = await generateOpenAIResponse(
+        prompt,
+        "document-analyzer",
+        "You are an expert document analyzer specializing in employment documents. Extract key information accurately and present it in a structured format. Be thorough but concise.",
+        {
+          model: "gpt-3.5-turbo",
+          temperature: 0.3,
+          max_tokens: 800,
+        },
+      );
+
+      // Parse the response
+      const content = response.content;
+      console.log("OpenAI Analysis Response:", content);
+
+      // Extract information from the response
+      // This is a simple parsing approach - could be improved with regex or more sophisticated parsing
+      const lines = content.split("\n").filter((line) => line.trim() !== "");
+
+      // Default structure
+      const result: any = {
+        documentType: "Unknown",
+        summary: "Analysis could not be completed.",
+        keyClauses: [],
+        concerns: "",
+      };
+
+      // Extract document type
+      const docTypeMatch = content.match(/Document Type:?\s*([^\n]+)/i);
+      if (docTypeMatch && docTypeMatch[1]) {
+        result.documentType = docTypeMatch[1].trim();
+      } else {
+        result.documentType =
+          docType === "Contract"
+            ? "Employment Contract"
+            : docType === "Review"
+              ? "Performance Review"
+              : docType === "Resume"
+                ? "Resume/CV"
+                : "General Document";
+      }
+
+      // Extract dates
+      const dateMatch = content.match(/(Effective|Review) Date:?\s*([^\n]+)/i);
+      if (dateMatch && dateMatch[2]) {
+        if (dateMatch[1].toLowerCase() === "effective") {
+          result.effectiveDate = dateMatch[2].trim();
+        } else {
+          result.reviewDate = dateMatch[2].trim();
+        }
+      } else {
+        // Default dates if not found
+        if (docType === "Contract") {
+          result.effectiveDate = new Date().toLocaleDateString();
+        } else if (docType === "Review") {
+          result.reviewDate = new Date().toLocaleDateString();
+        } else {
+          result.date = new Date().toLocaleDateString();
+        }
+      }
+
+      // Extract parties
+      const partiesMatch = content.match(/Parties( Involved)?:?\s*([^\n]+)/i);
+      if (partiesMatch && partiesMatch[2]) {
+        result.parties = partiesMatch[2].trim();
+      } else {
+        result.parties = "Not specified";
+      }
+
+      // Extract duration/period
+      const durationMatch = content.match(/(Duration|Period):?\s*([^\n]+)/i);
+      if (durationMatch && durationMatch[2]) {
+        if (durationMatch[1].toLowerCase() === "duration") {
+          result.duration = durationMatch[2].trim();
+        } else {
+          result.period = durationMatch[2].trim();
+        }
+      }
+
+      // Extract summary
+      const summaryMatch = content.match(/Summary:?\s*([^\n]+(?:\n[^\n]+)*)/i);
+      if (summaryMatch && summaryMatch[1]) {
+        result.summary = summaryMatch[1].trim();
+      }
+
+      // Extract key clauses
+      const keyClausesMatch = content.match(
+        /Key Clauses:?\s*([\s\S]*?)(?:\n\s*Concerns|$)/i,
+      );
+      if (keyClausesMatch && keyClausesMatch[1]) {
+        const clausesText = keyClausesMatch[1].trim();
+        const clauseMatches = clausesText.match(
+          /\d\.?\s*([^:\n]+):?\s*([^\d][^\n]+(?:\n(?!\d\.)[^\n]+)*)/g,
+        );
+
+        if (clauseMatches) {
+          result.keyClauses = clauseMatches.map((clause) => {
+            const titleMatch = clause.match(/\d\.?\s*([^:\n]+):?/i);
+            const contentMatch = clause.match(/\d\.?\s*[^:\n]+:?\s*([\s\S]+)/i);
+
+            return {
+              title: titleMatch ? titleMatch[1].trim() : "Key Point",
+              content: contentMatch ? contentMatch[1].trim() : clause.trim(),
+            };
+          });
+        }
+      }
+
+      // If no key clauses were found, add default ones
+      if (!result.keyClauses || result.keyClauses.length === 0) {
+        result.keyClauses = [
+          {
+            title: "Main Point",
+            content:
+              "The document contains important information that should be reviewed carefully.",
+          },
+        ];
+      }
+
+      // Extract concerns
+      const concernsMatch = content.match(
+        /Concerns:?\s*([^\n]+(?:\n[^\n]+)*)/i,
+      );
+      if (concernsMatch && concernsMatch[1]) {
+        result.concerns = concernsMatch[1].trim();
+      }
+
+      // Add reviewer/reviewee for performance reviews
+      if (docType === "Review" && !result.reviewer) {
+        const reviewerMatch = content.match(/Reviewer:?\s*([^\n]+)/i);
+        if (reviewerMatch && reviewerMatch[1]) {
+          result.reviewer = reviewerMatch[1].trim();
+        } else {
+          result.reviewer = "Not specified";
+        }
+
+        const revieweeMatch = content.match(/Reviewee:?\s*([^\n]+)/i);
+        if (revieweeMatch && revieweeMatch[1]) {
+          result.reviewee = revieweeMatch[1].trim();
+        } else {
+          result.reviewee = "Not specified";
+        }
+      }
+
+      console.log("Parsed Analysis Result:", result);
+      return result;
+    } catch (error) {
+      console.error("Error generating document analysis:", error);
+
+      // Fallback to basic analysis if OpenAI fails
+      switch (docType) {
+        case "Contract":
+          return {
+            documentType: "Employment Contract",
+            effectiveDate: new Date().toLocaleDateString(),
+            parties: "Employee and Employer",
+            duration: "Standard term",
+            summary:
+              "This appears to be an employment contract. Due to technical limitations, a detailed analysis could not be performed. Please review the document manually.",
+            keyClauses: [
+              {
+                title: "Important Note",
+                content:
+                  "AI analysis is currently unavailable. Please check the document manually for important terms.",
+              },
+            ],
+            concerns:
+              "Unable to identify concerns due to analysis limitations.",
+          };
+        case "Review":
+          return {
+            documentType: "Performance Review",
+            reviewDate: new Date().toLocaleDateString(),
+            reviewer: "Manager",
+            reviewee: "Employee",
+            period: "Recent performance period",
+            summary:
+              "This appears to be a performance review document. Due to technical limitations, a detailed analysis could not be performed. Please review the document manually.",
+            keyClauses: [
+              {
+                title: "Important Note",
+                content:
+                  "AI analysis is currently unavailable. Please check the document manually for important details.",
+              },
+            ],
+            concerns: "",
+          };
+        case "Resume":
+          return {
+            documentType: "Resume/CV",
+            date: new Date().toLocaleDateString(),
+            parties: "Candidate",
+            summary:
+              "This appears to be a resume or CV. Due to technical limitations, a detailed analysis could not be performed. Please review the document manually.",
+            keyClauses: [
+              {
+                title: "Important Note",
+                content:
+                  "AI analysis is currently unavailable. Please check the document manually for skills and experience details.",
+              },
+            ],
+            skills: ["Not analyzed"],
+            experience: "Not analyzed",
+            education: "Not analyzed",
+            certifications: "Not analyzed",
+            concerns: "",
+          };
+        default:
+          return {
+            documentType: "Document",
+            date: new Date().toLocaleDateString(),
+            parties: "Various",
+            summary:
+              "This document could not be analyzed due to technical limitations. Please review it manually.",
+            keyClauses: [
+              {
+                title: "Important Note",
+                content:
+                  "AI analysis is currently unavailable. Please check the document manually.",
+              },
+            ],
+            concerns: "",
+          };
+      }
     }
   };
 
   const filteredDocuments = documents.filter((doc) => {
     // Filter by search query
-    const matchesSearch =
-      doc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      doc.type.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = searchQuery
+      ? doc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        doc.type.toLowerCase().includes(searchQuery.toLowerCase())
+      : true;
 
     // Filter by tab
     if (activeTab === "all") return matchesSearch;
@@ -676,12 +1013,15 @@ const DocumentManager = () => {
 
   const handleAnalyzeRequest = () => {
     if (selectedDocument) {
-      if (selectedDocument.status === "none") {
+      if (
+        selectedDocument.status === "none" ||
+        selectedDocument.status === "analyzed"
+      ) {
         // Request analysis for the document
         requestDocumentAnalysis(selectedDocument.id);
-      } else {
-        // Show analysis results dialog
-        setShowAnalysisDialog(true);
+      } else if (selectedDocument.status === "pending") {
+        // Show a message that analysis is in progress
+        alert("Analysis is currently in progress. Please wait.");
       }
     }
   };
@@ -845,7 +1185,9 @@ const DocumentManager = () => {
                   // Close dialog
                   const closeButton = document
                     .querySelector('[role="dialog"]')
-                    ?.querySelector('button[aria-label="Close"]') as HTMLElement;
+                    ?.querySelector(
+                      'button[aria-label="Close"]',
+                    ) as HTMLElement;
                   if (closeButton) {
                     closeButton.click();
                   }
@@ -882,7 +1224,10 @@ const DocumentManager = () => {
                       : selectedFile.name.endsWith(".docx") ||
                           selectedFile.name.endsWith(".doc")
                         ? "Review"
-                        : "Document";
+                        : selectedFile.name.toLowerCase().includes("resume") ||
+                            selectedFile.name.toLowerCase().includes("cv")
+                          ? "Resume"
+                          : "Document";
 
                     // Start the upload with progress tracking
                     const uploadProgressInterval = setInterval(() => {
@@ -906,14 +1251,16 @@ const DocumentManager = () => {
                     setTimeout(() => {
                       setSelectedFile(null);
                       setIsUploading(false);
-                      
+
                       // Trigger document list refresh
                       setShouldRefreshDocs(true);
-                      
+
                       // Close dialog automatically on success
                       const closeButton = document
                         .querySelector('[role="dialog"]')
-                        ?.querySelector('button[aria-label="Close"]') as HTMLElement;
+                        ?.querySelector(
+                          'button[aria-label="Close"]',
+                        ) as HTMLElement;
                       if (closeButton) {
                         closeButton.click();
                       }
@@ -974,211 +1321,20 @@ const DocumentManager = () => {
               </Tabs>
             </CardHeader>
             <CardContent>
-              <ScrollArea className="h-[500px] w-full pr-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Size</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {isLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center py-10">
-                          <div className="flex justify-center">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                          </div>
-                          <p className="mt-2 text-muted-foreground">
-                            Loading documents...
-                          </p>
-                        </TableCell>
-                      </TableRow>
-                    ) : error ? (
-                      <TableRow>
-                        <TableCell
-                          colSpan={6}
-                          className="text-center py-10 text-destructive"
-                        >
-                          {error}
-                        </TableCell>
-                      </TableRow>
-                    ) : filteredDocuments.length > 0 ? (
-                      filteredDocuments.map((doc) => (
-                        <TableRow
-                          key={doc.id}
-                          className="cursor-pointer"
-                          onClick={() => handleDocumentClick(doc)}
-                        >
-                          <TableCell className="font-medium flex items-center gap-2">
-                            <FileText className="h-4 w-4 text-muted-foreground" />
-                            {doc.name}
-                          </TableCell>
-                          <TableCell>{doc.type}</TableCell>
-                          <TableCell>{doc.uploadDate}</TableCell>
-                          <TableCell>{doc.size}</TableCell>
-                          <TableCell>
-                            {doc.status === "analyzed" && (
-                              <Badge
-                                variant="secondary"
-                                className="bg-green-100 text-green-800"
-                              >
-                                Analyzed
-                              </Badge>
-                            )}
-                            {doc.status === "pending" && (
-                              <Badge
-                                variant="secondary"
-                                className="bg-yellow-100 text-yellow-800"
-                              >
-                                Pending
-                              </Badge>
-                            )}
-                            {doc.status === "none" && (
-                              <Badge variant="outline">Not Analyzed</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  if (doc.fileUrl) {
-                                    try {
-                                      // Extract file path from URL
-                                      const filePath = documentUtils.extractFilePathFromUrl(doc.fileUrl);
-                                      if (!filePath) {
-                                        throw new Error("Could not extract file path from URL");
-                                      }
-                                      
-                                      // Get temporary URL for viewing
-                                      const tempUrl = await documentUtils.getTemporaryFileUrl("phr-bucket", filePath);
-                                      if (!tempUrl) {
-                                        throw new Error("Failed to generate temporary URL for viewing");
-                                      }
-                                      
-                                      // Open in new tab
-                                      window.open(tempUrl, "_blank");
-                                    } catch (err) {
-                                      console.error("Error viewing document:", err);
-                                      alert("Error viewing document. Please try again later.");
-                                    }
-                                  }
-                                }}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  if (doc.fileUrl) {
-                                    try {
-                                      // Extract file path from URL
-                                      const filePath = documentUtils.extractFilePathFromUrl(doc.fileUrl);
-                                      if (!filePath) {
-                                        throw new Error("Could not extract file path from URL");
-                                      }
-                                      
-                                      // Get temporary URL for download
-                                      const tempUrl = await documentUtils.getTemporaryFileUrl("phr-bucket", filePath);
-                                      if (!tempUrl) {
-                                        throw new Error("Failed to generate temporary URL for download");
-                                      }
-                                      
-                                      // Create link and trigger download
-                                      const link = document.createElement("a");
-                                      link.href = tempUrl;
-                                      link.download = doc.name; // Set filename for download
-                                      document.body.appendChild(link);
-                                      link.click();
-                                      document.body.removeChild(link);
-                                    } catch (err) {
-                                      console.error("Error downloading document:", err);
-                                      alert("Error downloading document. Please try again later.");
-                                    }
-                                  }
-                                }}
-                              >
-                                <Download className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={async (e) => {
-                                  e.stopPropagation();
-                                  
-                                  // Confirmation dialog
-                                  const confirmDelete = confirm(
-                                    "Are you sure you want to delete this document? This action cannot be undone."
-                                  );
-                                  
-                                  if (confirmDelete) {
-                                    try {
-                                      // Delete from database first
-                                      const { error } = await supabase
-                                        .from("documents")
-                                        .delete()
-                                        .eq("id", doc.id);
-
-                                      if (error) throw error;
-                                      
-                                      // If successful, delete from storage
-                                      if (doc.fileUrl) {
-                                        const filePath = documentUtils.extractFilePathFromUrl(doc.fileUrl);
-                                        if (filePath) {
-                                          await documentUtils.deleteStorageFile("phr-bucket", filePath);
-                                        }
-                                      }
-
-                                      // Update local state
-                                      setDocuments(
-                                        documents.filter(
-                                          (d) => d.id !== doc.id,
-                                        ),
-                                      );
-                                      if (selectedDocument?.id === doc.id) {
-                                        setSelectedDocument(null);
-                                      }
-                                    } catch (err) {
-                                      console.error(
-                                        "Error deleting document:",
-                                        err,
-                                      );
-                                      alert(
-                                        "Failed to delete document. Please try again."
-                                      );
-                                    }
-                                  }
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell
-                          colSpan={6}
-                          className="text-center py-10 text-muted-foreground"
-                        >
-                          No documents found. Try adjusting your search or
-                          upload a new document.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+              <DocumentList
+                documents={filteredDocuments}
+                isLoading={isLoading}
+                error={error}
+                onDocumentClick={handleDocumentClick}
+                documentUtils={documentUtils}
+                onDocumentDelete={(docId) => {
+                  // Update local state
+                  setDocuments(documents.filter((d) => d.id !== docId));
+                  if (selectedDocument?.id === docId) {
+                    setSelectedDocument(null);
+                  }
+                }}
+              />
             </CardContent>
           </Card>
         </div>
@@ -1202,13 +1358,61 @@ const DocumentManager = () => {
                   </div>
 
                   <div className="space-y-2">
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span className="text-sm text-muted-foreground">
                         Type:
                       </span>
-                      <span className="text-sm font-medium">
-                        {selectedDocument.type}
-                      </span>
+                      {editingType ? (
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={newDocType}
+                            onValueChange={setNewDocType}
+                          >
+                            <SelectTrigger className="w-[140px] h-8">
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Contract">Contract</SelectItem>
+                              <SelectItem value="Review">Review</SelectItem>
+                              <SelectItem value="Resume">Resume</SelectItem>
+                              <SelectItem value="Document">Document</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={saveDocumentType}
+                          >
+                            <Check className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setEditingType(false)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium">
+                            {selectedDocument.type}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => {
+                              setNewDocType(selectedDocument.type);
+                              setEditingType(true);
+                            }}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      )}
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm text-muted-foreground">
@@ -1255,33 +1459,52 @@ const DocumentManager = () => {
                       <Button
                         className="w-full gap-2"
                         onClick={handleAnalyzeRequest}
+                        disabled={isAnalyzing}
                       >
-                        <BarChart className="h-4 w-4" />
-                        Analyze Document
+                        {isAnalyzing ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                            Analyzing...
+                          </>
+                        ) : (
+                          <>
+                            <BarChart className="h-4 w-4" />
+                            Analyze Document
+                          </>
+                        )}
                       </Button>
                     </div>
                   )}
                 </div>
               </CardContent>
               <CardFooter className="flex justify-between">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="gap-2"
                   onClick={async () => {
                     if (selectedDocument?.fileUrl) {
                       try {
                         // Extract file path from URL
-                        const filePath = documentUtils.extractFilePathFromUrl(selectedDocument.fileUrl);
+                        const filePath = documentUtils.extractFilePathFromUrl(
+                          selectedDocument.fileUrl,
+                        );
                         if (!filePath) {
-                          throw new Error("Could not extract file path from URL");
+                          throw new Error(
+                            "Could not extract file path from URL",
+                          );
                         }
-                        
+
                         // Get temporary URL for download
-                        const tempUrl = await documentUtils.getTemporaryFileUrl("phr-bucket", filePath);
+                        const tempUrl = await documentUtils.getTemporaryFileUrl(
+                          "phr-bucket",
+                          filePath,
+                        );
                         if (!tempUrl) {
-                          throw new Error("Failed to generate temporary URL for download");
+                          throw new Error(
+                            "Failed to generate temporary URL for download",
+                          );
                         }
-                        
+
                         // Create link and trigger download
                         const link = document.createElement("a");
                         link.href = tempUrl;
@@ -1291,7 +1514,9 @@ const DocumentManager = () => {
                         document.body.removeChild(link);
                       } catch (err) {
                         console.error("Error downloading document:", err);
-                        alert("Error downloading document. Please try again later.");
+                        alert(
+                          "Error downloading document. Please try again later.",
+                        );
                       }
                     }
                   }}
@@ -1299,29 +1524,40 @@ const DocumentManager = () => {
                   <Download className="h-4 w-4" />
                   Download
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="gap-2"
                   onClick={async () => {
                     if (selectedDocument?.fileUrl) {
                       try {
                         // Extract file path from URL
-                        const filePath = documentUtils.extractFilePathFromUrl(selectedDocument.fileUrl);
+                        const filePath = documentUtils.extractFilePathFromUrl(
+                          selectedDocument.fileUrl,
+                        );
                         if (!filePath) {
-                          throw new Error("Could not extract file path from URL");
+                          throw new Error(
+                            "Could not extract file path from URL",
+                          );
                         }
-                        
+
                         // Get temporary URL for viewing
-                        const tempUrl = await documentUtils.getTemporaryFileUrl("phr-bucket", filePath);
+                        const tempUrl = await documentUtils.getTemporaryFileUrl(
+                          "phr-bucket",
+                          filePath,
+                        );
                         if (!tempUrl) {
-                          throw new Error("Failed to generate temporary URL for viewing");
+                          throw new Error(
+                            "Failed to generate temporary URL for viewing",
+                          );
                         }
-                        
+
                         // Open in new tab
                         window.open(tempUrl, "_blank");
                       } catch (err) {
                         console.error("Error viewing document:", err);
-                        alert("Error viewing document. Please try again later.");
+                        alert(
+                          "Error viewing document. Please try again later.",
+                        );
                       }
                     }
                   }}
@@ -1359,97 +1595,119 @@ const DocumentManager = () => {
               AI-powered analysis of {selectedDocument?.name}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="bg-muted p-4 rounded-md">
-              <h3 className="font-medium mb-2">Key Information</h3>
-              <ul className="space-y-2">
-                <li className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">
-                    Document Type:
-                  </span>
-                  <span className="text-sm font-medium">
-                    Employment Contract
-                  </span>
-                </li>
-                <li className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">
-                    Effective Date:
-                  </span>
-                  <span className="text-sm font-medium">January 15, 2023</span>
-                </li>
-                <li className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">
-                    Parties Involved:
-                  </span>
-                  <span className="text-sm font-medium">
-                    Acme Corporation, John Doe
-                  </span>
-                </li>
-                <li className="flex justify-between">
-                  <span className="text-sm text-muted-foreground">
-                    Contract Duration:
-                  </span>
-                  <span className="text-sm font-medium">
-                    12 months (renewable)
-                  </span>
-                </li>
-              </ul>
+          {isAnalyzing ? (
+            <div className="flex flex-col items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+              <p className="text-muted-foreground">Analyzing document...</p>
             </div>
-
-            <div>
-              <h3 className="font-medium mb-2">Summary</h3>
-              <p className="text-sm text-muted-foreground">
-                This is a standard employment contract between Acme Corporation
-                and John Doe. The contract outlines the terms of employment,
-                including compensation, benefits, working hours, and termination
-                conditions. The contract includes a non-compete clause valid for
-                12 months after termination and a confidentiality agreement.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="font-medium mb-2">Key Clauses</h3>
-              <div className="space-y-3">
-                <div className="bg-muted/50 p-3 rounded-md">
-                  <h4 className="text-sm font-medium">Compensation</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Annual salary of $85,000 paid bi-weekly, with
-                    performance-based bonus eligibility up to 15% of base
-                    salary.
-                  </p>
-                </div>
-                <div className="bg-muted/50 p-3 rounded-md">
-                  <h4 className="text-sm font-medium">Termination</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Either party may terminate with 30 days written notice.
-                    Severance package of 2 weeks per year of service in case of
-                    company-initiated termination without cause.
-                  </p>
-                </div>
-                <div className="bg-muted/50 p-3 rounded-md">
-                  <h4 className="text-sm font-medium">Non-Compete</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Employee agrees not to work for direct competitors for 12
-                    months after termination within a 50-mile radius.
-                  </p>
-                </div>
+          ) : analysisResults ? (
+            <div className="space-y-4 py-4">
+              <div className="bg-muted p-4 rounded-md">
+                <h3 className="font-medium mb-2">Key Information</h3>
+                <ul className="space-y-2">
+                  <li className="flex justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      Document Type:
+                    </span>
+                    <span className="text-sm font-medium">
+                      {analysisResults.documentType}
+                    </span>
+                  </li>
+                  {analysisResults.effectiveDate && (
+                    <li className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        Effective Date:
+                      </span>
+                      <span className="text-sm font-medium">
+                        {analysisResults.effectiveDate}
+                      </span>
+                    </li>
+                  )}
+                  {analysisResults.reviewDate && (
+                    <li className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        Review Date:
+                      </span>
+                      <span className="text-sm font-medium">
+                        {analysisResults.reviewDate}
+                      </span>
+                    </li>
+                  )}
+                  {analysisResults.parties && (
+                    <li className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        Parties Involved:
+                      </span>
+                      <span className="text-sm font-medium">
+                        {analysisResults.parties}
+                      </span>
+                    </li>
+                  )}
+                  {analysisResults.duration && (
+                    <li className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        Duration:
+                      </span>
+                      <span className="text-sm font-medium">
+                        {analysisResults.duration}
+                      </span>
+                    </li>
+                  )}
+                  {analysisResults.period && (
+                    <li className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">
+                        Review Period:
+                      </span>
+                      <span className="text-sm font-medium">
+                        {analysisResults.period}
+                      </span>
+                    </li>
+                  )}
+                </ul>
               </div>
-            </div>
 
-            <div>
-              <h3 className="font-medium mb-2">Potential Concerns</h3>
-              <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded-md">
-                <p className="text-sm">
-                  The non-compete clause may be overly restrictive and
-                  potentially unenforceable in some jurisdictions. Consider
-                  consulting with a legal professional for clarification.
+              <div>
+                <h3 className="font-medium mb-2">Summary</h3>
+                <p className="text-sm text-muted-foreground">
+                  {analysisResults.summary}
                 </p>
               </div>
+
+              <div>
+                <h3 className="font-medium mb-2">Key Clauses</h3>
+                <div className="space-y-3">
+                  {analysisResults.keyClauses.map(
+                    (clause: any, index: number) => (
+                      <div key={index} className="bg-muted/50 p-3 rounded-md">
+                        <h4 className="text-sm font-medium">{clause.title}</h4>
+                        <p className="text-sm text-muted-foreground">
+                          {clause.content}
+                        </p>
+                      </div>
+                    ),
+                  )}
+                </div>
+              </div>
+
+              {analysisResults.concerns && (
+                <div>
+                  <h3 className="font-medium mb-2">Potential Concerns</h3>
+                  <div className="bg-yellow-50 border-l-4 border-yellow-400 p-3 rounded-md">
+                    <p className="text-sm">{analysisResults.concerns}</p>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-12">
+              <p className="text-muted-foreground">
+                No analysis data available
+              </p>
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline">Download Analysis</Button>
-            <Button>Close</Button>
+            <Button onClick={() => setShowAnalysisDialog(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

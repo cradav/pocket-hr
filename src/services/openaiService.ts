@@ -130,6 +130,8 @@ export function getSystemPromptForMode(mode: string): string {
       return "You are a performance improvement advisor. Help the user enhance their workplace performance and prepare for reviews. Provide actionable strategies for professional development and career advancement.";
     case "benefits-advisor":
       return "You are a benefits advisor. Help the user understand and optimize their employee benefits package. Provide guidance on health insurance, retirement plans, and other workplace benefits.";
+    case "document-analyzer":
+      return "You are an expert document analyzer specializing in employment documents. Extract key information accurately and present it in a structured format. Be thorough but concise.";
     default:
       return "You are an AI HR assistant. Provide helpful, professional advice on career and workplace topics. Be concise, specific, and actionable in your responses.";
   }

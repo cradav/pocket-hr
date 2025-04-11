@@ -34,7 +34,7 @@ const ProtectedRoute = ({ children, requiresAdmin = false }) => {
   }
 
   if (requiresAdmin) {
-    const isAdmin = user.user_metadata?.role === 'admin' || false;
+    const isAdmin = user.user_metadata?.role === "admin" || false;
     if (!isAdmin) {
       return <Navigate to="/" replace />;
     }

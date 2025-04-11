@@ -251,17 +251,22 @@ const AccountSettings = () => {
 
     setIsSaving(true);
     try {
-      const result = await updateProfile({
+      // Create a properly formatted update object
+      const updateData = {
         full_name: formData.name,
         phone: formData.phone,
         company: formData.company,
         job_title: formData.jobTitle,
         // In a real app, you might update email through auth service instead
-      });
+      };
+
+      console.log("Saving profile with data:", updateData);
+      const result = await updateProfile(updateData);
 
       if (result.error) {
         console.error("Error updating profile:", result.error);
       } else {
+        console.log("Profile saved successfully:", result.data);
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 3000);
         setIsEditing(false);
@@ -278,16 +283,24 @@ const AccountSettings = () => {
 
     setIsSaving(true);
     try {
-      const result = await updateProfile({
+      // Create a properly formatted update object
+      const updateData = {
         email_notifications: emailNotifications,
         push_notifications: pushNotifications,
         weekly_digest: weeklyDigest,
         consultation_reminders: consultationReminders,
-      });
+      };
+
+      console.log("Saving notification preferences:", updateData);
+      const result = await updateProfile(updateData);
 
       if (result.error) {
         console.error("Error updating notification preferences:", result.error);
       } else {
+        console.log(
+          "Notification preferences saved successfully:",
+          result.data,
+        );
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 3000);
       }
@@ -308,12 +321,20 @@ const AccountSettings = () => {
 
   // Save AI category preferences
   const saveAICategoryPreferences = () => {
-    localStorage.setItem(
-      "aiCategoryVisibility",
-      JSON.stringify(visibleCategories),
-    );
-    setAiCategorySaveSuccess(true);
-    setTimeout(() => setAiCategorySaveSuccess(false), 3000);
+    try {
+      localStorage.setItem(
+        "aiCategoryVisibility",
+        JSON.stringify(visibleCategories),
+      );
+      console.log(
+        "AI category preferences saved to localStorage:",
+        visibleCategories,
+      );
+      setAiCategorySaveSuccess(true);
+      setTimeout(() => setAiCategorySaveSuccess(false), 3000);
+    } catch (error) {
+      console.error("Error saving AI category preferences:", error);
+    }
   };
 
   const isPremium = profile?.plan_type === "premium";

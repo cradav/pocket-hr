@@ -16,8 +16,21 @@ export type Database = {
           word_credits_total: number;
         };
       };
+      documents: {
+        Row: {
+          id: string;
+          user_id: string;
+          name: string;
+          type: string;
+          size: number;
+          file_url: string;
+          upload_date: string;
+          analysis_status: string;
+          category: string | null;
+          analysis_results: any | null;
+        };
+      };
       // Add other tables as needed
     };
   };
 };
-
