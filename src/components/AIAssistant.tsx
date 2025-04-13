@@ -75,6 +75,7 @@ import MessageFormatter from "./AIAssistant/MessageFormatter";
 import { ChatHistory } from './AIAssistant/ChatHistory';
 import { v4 as uuidv4 } from 'uuid';
 import { Assistant as NewAssistant } from '../types/assistant';
+import { WordCreditsService } from "../services/wordCreditsService";
 
 interface VoiceResponse {
   audioUrl: string;
@@ -154,6 +155,31 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
     initializeCareerStages,
   );
   const [user, setUser] = useState<any>(null);
+
+  // Add new state for word credits
+  const [userWordCredits, setUserWordCredits] = useState<{
+    remaining: number;
+    total: number;
+  } | null>(null);
+
+  // Add useEffect to fetch word credits
+  useEffect(() => {
+    const fetchWordCredits = async () => {
+      if (userId) {
+        try {
+          const credits = await WordCreditsService.getUserCredits(userId);
+          setUserWordCredits({
+            remaining: credits.word_credits_remaining,
+            total: credits.word_credits_total
+          });
+        } catch (error) {
+          console.error('Error fetching word credits:', error);
+        }
+      }
+    };
+
+    fetchWordCredits();
+  }, [userId]);
 
   // Add effect to auto-select Landing the Role stage and first assistant
   useEffect(() => {
@@ -511,19 +537,29 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
     e.preventDefault();
     if (!userId || !selectedAssistant || !inputValue.trim()) return;
 
-    setIsLoading(true);
-    setError(null);
-
     try {
+      // Estimate words that will be used
+      const estimatedWords = 100; // base estimated value per response
+
+      // Check if user has enough credits
+      const hasCredits = await WordCreditsService.hasEnoughCredits(userId, estimatedWords);
+      if (!hasCredits) {
+        setError('You have insufficient word credits remaining. Please upgrade your plan to continue using the AI assistant.');
+        return;
+      }
+
+      setIsLoading(true);
+      setError(null);
+
       let currentConversation = activeConversation;
 
       // Create new conversation if needed
       if (!currentConversation) {
-        const newConversation: Conversation = {
-          id: uuidv4(), // Generate UUID for new conversation
+        const newConversation = {
+          id: uuidv4(),
           user_id: userId,
           assistant_id: selectedAssistant,
-          title: inputValue.substring(0, 50), // Use first 50 chars as title
+          title: inputValue.substring(0, 50),
           created_at: new Date().toISOString(),
           last_updated: new Date().toISOString()
         };
@@ -564,6 +600,10 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
       // Generate AI response
       const response = await generateOpenAIResponse(inputValue, findAssistantById(selectedAssistant)?.mode || 'default');
       
+      // Calculate words used and update credits
+      const wordsUsed = Math.ceil(response.content.split(' ').length);
+      await WordCreditsService.updateUserCredits(userId, wordsUsed);
+
       // Store AI message
       const aiMessage = {
         conversation_id: currentConversation.id,
@@ -621,15 +661,18 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
       }
       setStagesWithConversations(updatedStages);
 
-      // Calculate words used and update credits if callback provided
+      // Update word credits in UI if callback provided
       if (onWordUsage) {
-        const wordsUsed = Math.ceil(response.tokenCount * 0.75);
         onWordUsage(wordsUsed);
       }
 
     } catch (error) {
-      console.error('Error sending message:', error);
-      setError('Failed to send message. Please try again.');
+      console.error('Error:', error);
+      if (error.message === 'Insufficient word credits') {
+        setError('You have insufficient word credits remaining. Please upgrade your plan to continue using the AI assistant.');
+      } else {
+        setError('Failed to send message. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -707,23 +750,32 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
   };
 
   const processVoiceMessage = async (audioBlob: Blob) => {
-    // Clear any text in the input field when starting voice processing
-    setInputValue("");
-
-    // Add a user message placeholder
-    const userMessage: DBMessage = {
-      id: Date.now().toString(),
-      conversation_id: activeConversation?.id || '',
-      content: "Processing voice message...",
-      sender: "user",
-      created_at: new Date().toISOString(),
-      isVoice: true
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setIsProcessingVoice(true);
-
     try {
+      // Estimate words that will be used
+      const estimatedWords = 100; // base estimated value per response
+
+      // Check if user has enough credits
+      const hasCredits = await WordCreditsService.hasEnoughCredits(userId, estimatedWords);
+      if (!hasCredits) {
+        throw new Error('Insufficient word credits');
+      }
+
+      // Clear any text in the input field when starting voice processing
+      setInputValue("");
+
+      // Add a user message placeholder
+      const userMessage = {
+        id: Date.now().toString(),
+        conversation_id: activeConversation?.id || '',
+        content: "Processing voice message...",
+        sender: "user",
+        created_at: new Date().toISOString(),
+        isVoice: true
+      };
+
+      setMessages((prev) => [...prev, userMessage]);
+      setIsProcessingVoice(true);
+
       // If no active conversation, create one
       if (!activeConversation) {
         createNewConversation(selectedAssistant);
@@ -731,7 +783,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
 
       // Find the selected assistant to get the mode
       let assistantMode = "default";
-      let selectedAssistantObj: any = null;
+      let selectedAssistantObj = null;
 
       for (const stage of stagesWithConversations) {
         const assistant = stage.assistants.find(
@@ -747,14 +799,13 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
       // Process voice input
       const sessionConfig = {
         conversationId: activeConversation?.id || `temp-${Date.now()}`,
-        userId: "current-user", // This should be replaced with actual user ID
-        voice: "alloy", // Default voice
+        userId: "current-user",
+        voice: "alloy",
         systemPrompt:
           getSystemPromptForMode(assistantMode) +
           " Respond conversationally as this will be spoken aloud.",
       };
 
-      // Get user token from session if available
       const userToken = localStorage.getItem("userToken") || undefined;
 
       const response = await processVoiceInput(
@@ -763,6 +814,10 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
         assistantMode,
         userToken,
       );
+
+      // Calculate words used and update credits
+      const wordsUsed = Math.ceil(response.text.split(' ').length);
+      await WordCreditsService.updateUserCredits(userId, wordsUsed);
 
       // Update the user message with transcribed text
       const updatedMessages = [...messages];
@@ -773,11 +828,11 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
       if (userMessageIndex >= 0) {
         updatedMessages[userMessageIndex].content = response.text
           .split("(tone:")[0]
-          .trim(); // Remove tone annotation
+          .trim();
       }
 
       // Add AI response
-      const aiResponse: DBMessage = {
+      const aiResponse = {
         id: (Date.now() + 1).toString(),
         conversation_id: activeConversation?.id || '',
         content: response.text,
@@ -791,12 +846,6 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
       setMessages(finalMessages);
       setAudioUrl(response.audioUrl);
 
-      // Calculate words used and update credits if callback provided
-      if (onWordUsage) {
-        const wordsUsed = Math.ceil(response.tokenCount * 0.75);
-        onWordUsage(wordsUsed);
-      }
-
       // Update conversation in state
       if (activeConversation) {
         const updatedStages = [...stagesWithConversations];
@@ -809,7 +858,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
 
               if (convIndex >= 0) {
                 assistant.conversations[convIndex].messages = finalMessages;
-                assistant.conversations[convIndex].last_updated = new Date().toISOString();
+                assistant.conversations[convIndex].lastUpdated = new Date();
                 setStagesWithConversations(updatedStages);
               }
             }
@@ -825,17 +874,25 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
       }
     } catch (error) {
       console.error("Error processing voice message:", error);
-
-      // Add error message
-      const errorMessage: DBMessage = {
-        id: (Date.now() + 1).toString(),
-        conversation_id: activeConversation?.id || '',
-        content: "Sorry, I encountered an error processing your voice message. Let's continue by text.",
-        sender: "assistant",
-        created_at: new Date().toISOString()
-      };
-
-      setMessages((prev) => [...prev, errorMessage]);
+      if (error.message === 'Insufficient word credits') {
+        const errorMessage = {
+          id: (Date.now() + 1).toString(),
+          conversation_id: activeConversation?.id || '',
+          content: "You have insufficient word credits remaining. Please upgrade your plan to continue using the AI assistant.",
+          sender: "assistant",
+          created_at: new Date().toISOString()
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      } else {
+        const errorMessage = {
+          id: (Date.now() + 1).toString(),
+          conversation_id: activeConversation?.id || '',
+          content: "Sorry, I encountered an error processing your voice message. Let's continue by text.",
+          sender: "assistant",
+          created_at: new Date().toISOString()
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      }
     } finally {
       setIsProcessingVoice(false);
     }
@@ -1841,10 +1898,10 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
             </div>
             
             {/* Word Credits Display */}
-            {wordCredits && (
+            {userWordCredits && (
               <div className="flex justify-between items-center text-sm text-muted-foreground">
                 <div>
-                  Word Credits: {wordCredits.remaining}/{wordCredits.total} remaining this month
+                  Word Credits: {userWordCredits.remaining}/{userWordCredits.total} remaining this month
                 </div>
                 <Button
                   variant="ghost"
