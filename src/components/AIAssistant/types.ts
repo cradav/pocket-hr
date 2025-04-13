@@ -1,8 +1,10 @@
+import { DisplayConversation } from '../../types/conversation';
+
 export interface Message {
   id: string;
   conversation_id: string;
   content: string;
-  sender: 'ai' | 'user';
+  sender: 'assistant' | 'user';
   token_count?: number;
   audio_url?: string;
   created_at: string;
@@ -13,7 +15,7 @@ export interface Message {
 export interface MessageDisplay {
   id: string;
   content: string;
-  sender: 'ai' | 'user';
+  sender: 'assistant' | 'user';
   timestamp: Date;
   isVoice?: boolean;
   audio_url?: string;
@@ -33,13 +35,6 @@ export interface Conversation {
   last_updated: string;
   created_at: string;
   messages?: Message[];
-}
-
-export interface ConversationDisplay {
-  id: string;
-  title: string;
-  last_updated: Date;
-  messages: MessageDisplay[];
 }
 
 export interface SystemPrompt {
@@ -62,22 +57,23 @@ export interface Assistant {
   name: string;
   description: string;
   mode: string;
-  conversations: ConversationDisplay[];
-  systemPrompt?: SystemPrompt;
-  trainingDocuments?: TrainingDocument[];
   isActive: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface AssistantWithConversations extends Assistant {
+  conversations: DisplayConversation[];
 }
 
 export interface CareerStage {
   id: string;
   name: string;
   description: string;
-  assistants: Assistant[];
   isActive: boolean;
   created_at: string;
   updated_at: string;
+  assistants: Assistant[];
 }
 
 export interface AIAssistantProps {
@@ -106,4 +102,20 @@ export interface CareerStageFormData {
   name: string;
   description: string;
   isActive: boolean;
+}
+
+export interface DBMessage {
+  id: string;
+  conversation_id: string;
+  content: string;
+  sender: "assistant" | "user";
+  created_at: string;
+  isVoice?: boolean;
+  audio_url?: string;
+  token_count?: number;
+  moderation?: {
+    flagged: boolean;
+    categories: Record<string, boolean>;
+    scores: Record<string, number>;
+  };
 }

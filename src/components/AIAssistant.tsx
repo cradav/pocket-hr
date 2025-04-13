@@ -60,13 +60,13 @@ import {
 
 // Import types from the correct location
 import {
-  DBMessage,
-  DBConversation,
-  ConversationDisplay,
-  toConversationDisplay,
   Assistant,
-  AssistantWithActive
-} from '../types/assistant';
+  AssistantWithConversations,
+  CareerStage,
+  DBMessage
+} from './AIAssistant/types';
+import { Message, MessageDisplay, toMessageDisplay } from '../types/message';
+import { DisplayConversation, toDisplayConversation } from '../types/conversation';
 import { careerStages, initializeCareerStages } from "./AIAssistant/data";
 import { getModeChangeMessage } from "./AIAssistant/utils";
 import { generateOpenAIResponse } from "../services/openaiService";
@@ -74,8 +74,6 @@ import { processVoiceInput } from "../services/voiceService";
 import MessageFormatter from "./AIAssistant/MessageFormatter";
 import { ChatHistory } from './AIAssistant/ChatHistory';
 import { v4 as uuidv4 } from 'uuid';
-import { Message, MessageDisplay, MessageWithDate, toMessageDisplay, toMessageWithDate } from '../types/message';
-import { Conversation, ConversationWithDate, toConversationWithDate } from '../types/conversation';
 import { Assistant as NewAssistant } from '../types/assistant';
 
 interface VoiceResponse {
@@ -118,22 +116,25 @@ interface LocalConversation {
   messages: MessageDisplay[];
 }
 
-// Define interfaces locally to avoid conflicts
-interface Message {
+interface DBConversation {
   id: string;
-  conversation_id: string;
-  content: string;
-  sender: string;
+  user_id: string;
+  assistant_id: string;
+  title: string;
   created_at: string;
-  timestamp?: Date;
-  isVoice?: boolean;
-  audio_url?: string;
-  token_count?: number;
-  moderation?: {
-    flagged: boolean;
-    categories?: string[];
-    score?: number;
-  };
+  last_updated: string;
+  messages: DBMessage[];
+}
+
+interface ConversationDisplay {
+  id: string;
+  title: string;
+  lastUpdated: Date;
+  messages: Message[];
+}
+
+interface StageWithConversations extends CareerStage {
+  assistants: AssistantWithConversations[];
 }
 
 const AIAssistant: FC<ExtendedAIAssistantProps> = ({
@@ -154,12 +155,122 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
   );
   const [user, setUser] = useState<any>(null);
 
+  // Add effect to auto-select Landing the Role stage and first assistant
+  useEffect(() => {
+    const initializeAssistant = async () => {
+      if (!selectedCareerStage && careerStages.length > 0) {
+        // Find Landing the Role stage
+        const landingStage = careerStages.find(stage => stage.name === "Landing the Role");
+        if (landingStage) {
+          // Call onStageChange with the Landing stage ID
+          onStageChange?.(landingStage.id);
+          
+          // Select the first assistant from the Landing stage
+          if (landingStage.assistants.length > 0 && !selectedAssistant) {
+            const firstAssistant = landingStage.assistants[0];
+            setSelectedAssistant?.(firstAssistant.id);
+            
+            // Create initial conversation
+            const timestamp = new Date().toISOString();
+            const conversationId = uuidv4();
+            
+            try {
+              // Create the conversation in the database
+              const { data: newConv, error: convError } = await supabase
+                .from('conversations')
+                .insert({
+                  id: conversationId,
+                  user_id: userId,
+                  assistant_id: firstAssistant.id,
+                  title: 'New Conversation',
+                  created_at: timestamp,
+                  last_updated: timestamp
+                })
+                .select()
+                .single();
+
+              if (convError) throw convError;
+
+              // Create the initial message
+              const { data: newMsg, error: msgError } = await supabase
+                .from('messages')
+                .insert({
+                  id: uuidv4(),
+                  conversation_id: conversationId,
+                  content: getModeChangeMessage(firstAssistant.mode),
+                  sender: 'assistant',
+                  created_at: timestamp
+                })
+                .select()
+                .single();
+
+              if (msgError) throw msgError;
+
+              // Update state with the data from the database
+              const conversation: DBConversation = {
+                ...newConv,
+                messages: [newMsg]
+              };
+              
+              setActiveConversation(conversation);
+              setMessages([newMsg]);
+              
+              // Update display messages
+              const displayMessage: MessageDisplay = {
+                id: newMsg.id,
+                content: newMsg.content,
+                sender: 'assistant',
+                created_at: new Date(newMsg.created_at),
+                timestamp: new Date(newMsg.created_at)
+              };
+              setDisplayMessages([displayMessage]);
+
+            } catch (error) {
+              console.error('Error creating initial conversation:', error);
+              // Show error message but keep the assistant selected
+              const errorMessage: DBMessage = {
+                id: uuidv4(),
+                conversation_id: "",
+                content: "Sorry, I encountered an error creating the conversation. Please try again.",
+                sender: "assistant",
+                created_at: new Date().toISOString()
+              };
+              setMessages([errorMessage]);
+              setDisplayMessages([{
+                id: errorMessage.id,
+                content: errorMessage.content,
+                sender: "assistant",
+                created_at: new Date(errorMessage.created_at),
+                timestamp: new Date(errorMessage.created_at)
+              }]);
+            }
+          }
+        }
+      }
+    };
+
+    initializeAssistant();
+  }, [selectedCareerStage, selectedAssistant, onStageChange, setSelectedAssistant, userId]);
+
   // Get current user
   useEffect(() => {
     const getCurrentUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      if (data?.user) {
-        setUser(data.user);
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser) {
+        // Get user profile data including avatar_url
+        const { data: profile } = await supabase
+          .from('users')
+          .select('avatar_url')
+          .eq('id', currentUser.id)
+          .single();
+
+        setUser({
+          ...currentUser,
+          user_metadata: {
+            ...currentUser.user_metadata,
+            avatar_url: profile?.avatar_url || null
+          }
+        });
       }
     };
 
@@ -219,7 +330,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
     setDisplayMessages(messages.map(msg => ({
       id: msg.id,
       content: msg.content,
-      sender: msg.sender === 'ai' ? 'assistant' : 'user',
+      sender: msg.sender,
       created_at: new Date(msg.created_at),
       timestamp: new Date(msg.created_at),
       is_voice: msg.isVoice || false,
@@ -231,17 +342,20 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
   // Update display conversation whenever active conversation changes
   useEffect(() => {
     if (activeConversation) {
-      const displayConv: ConversationDisplay = {
+      const displayConv: DisplayConversation = {
         id: activeConversation.id,
+        user_id: activeConversation.user_id,
+        assistant_id: activeConversation.assistant_id,
         title: activeConversation.title,
-        lastUpdated: new Date(activeConversation.last_updated),
-        last_updated: activeConversation.last_updated,
+        created_at: new Date(activeConversation.created_at),
+        last_updated: new Date(activeConversation.last_updated),
         messages: activeConversation.messages?.map(msg => ({
           id: msg.id,
           content: msg.content,
-          sender: msg.sender as "ai" | "user",
+          sender: msg.sender,
+          created_at: new Date(msg.created_at),
           timestamp: new Date(msg.created_at),
-          is_voice: msg.isVoice,
+          is_voice: msg.isVoice || false,
           audio_url: msg.audio_url,
           token_count: msg.token_count
         })) || []
@@ -361,7 +475,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
         setDisplayMessages(messagesData.map(msg => ({
           id: msg.id,
           content: msg.content,
-          sender: msg.sender === 'ai' ? 'assistant' : 'user',
+          sender: msg.sender === 'assistant' ? 'assistant' : 'user',
           created_at: new Date(msg.created_at),
           timestamp: new Date(msg.created_at),
           is_voice: msg.is_voice || false,
@@ -454,7 +568,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
       const aiMessage = {
         conversation_id: currentConversation.id,
         content: response.content,
-        sender: 'ai',
+        sender: 'assistant',
         created_at: new Date().toISOString()
       };
 
@@ -667,7 +781,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
         id: (Date.now() + 1).toString(),
         conversation_id: activeConversation?.id || '',
         content: response.text,
-        sender: "ai",
+        sender: "assistant",
         created_at: new Date().toISOString(),
         audio_url: response.audioUrl,
         moderation: response.moderation,
@@ -717,7 +831,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
         id: (Date.now() + 1).toString(),
         conversation_id: activeConversation?.id || '',
         content: "Sorry, I encountered an error processing your voice message. Let's continue by text.",
-        sender: "ai",
+        sender: "assistant",
         created_at: new Date().toISOString()
       };
 
@@ -790,7 +904,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
       const stageChangeMessage: DBMessage = {
         id: Date.now().toString(),
         content: `I'm now focusing on "${stage.name}" stage. You can select a specific assistant for more targeted help.`,
-        sender: "ai",
+        sender: "assistant",
         created_at: new Date().toISOString(),
       };
 
@@ -882,7 +996,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
         id: uuidv4(),
         conversation_id: "",
         content: getModeChangeMessage(mode),
-        sender: "ai",
+        sender: "assistant",
         created_at: new Date().toISOString()
       };
 
@@ -896,7 +1010,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
         id: uuidv4(),
         conversation_id: "",
         content: "Sorry, I encountered an error loading the conversations. You can still start a new chat.",
-        sender: "ai",
+        sender: "assistant",
         created_at: new Date().toISOString()
       };
       setMessages([errorMessage]);
@@ -904,42 +1018,89 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
     }
   };
 
-  const createNewConversation = (assistantId: string) => {
-    const timestamp = new Date();
-    const conversationId = uuidv4();
-    
-    // Find the assistant mode
-    const assistantObj = findAssistantById(assistantId);
-    const mode = assistantObj?.mode || 'default';
-    
-    const newMessage: DBMessage = {
-      id: uuidv4(),
-      conversation_id: conversationId,
-      content: getModeChangeMessage(mode),
-      sender: "ai",
-      created_at: timestamp.toISOString()
-    };
+  const createNewConversation = async (assistantId: string) => {
+    try {
+      const timestamp = new Date().toISOString();
+      const conversationId = uuidv4();
+      
+      // Find the assistant mode
+      const assistantObj = findAssistantById(assistantId);
+      const mode = assistantObj?.mode || 'default';
+      
+      // Create the conversation in the database first
+      const { data: newConv, error: convError } = await supabase
+        .from('conversations')
+        .insert({
+          id: conversationId,
+          user_id: userId,
+          assistant_id: assistantId,
+          title: 'New Conversation',
+          created_at: timestamp,
+          last_updated: timestamp
+        })
+        .select()
+        .single();
 
-    const newConversation: Conversation = {
-      id: uuidv4(),
-      user_id: userId,
-      assistant_id: assistantId,
-      title: 'New Conversation',
-      created_at: new Date(),
-      last_updated: new Date()
-    };
+      if (convError) throw convError;
 
-    // Update state
-    setActiveConversation(newConversation);
-    setMessages([newMessage]);
-    
-    // Update display messages
-    setDisplayMessages([{
-      id: newMessage.id,
-      content: newMessage.content,
-      sender: newMessage.sender,
-      timestamp: new Date(newMessage.created_at)
-    }]);
+      // Create the initial message in the database
+      const { data: newMsg, error: msgError } = await supabase
+        .from('messages')
+        .insert({
+          id: uuidv4(),
+          conversation_id: conversationId,
+          content: getModeChangeMessage(mode),
+          sender: 'assistant',
+          created_at: timestamp
+        })
+        .select()
+        .single();
+
+      if (msgError) throw msgError;
+
+      // Update state with the data from the database
+      const conversation: DBConversation = {
+        ...newConv,
+        messages: [newMsg]
+      };
+      
+      setActiveConversation(conversation);
+      setMessages([newMsg]);
+      
+      // Update display messages
+      const displayMessage: DisplayMessage = {
+        id: newMsg.id,
+        content: newMsg.content,
+        sender: 'assistant',
+        created_at: new Date(newMsg.created_at),
+        timestamp: new Date(newMsg.created_at)
+      };
+      setDisplayMessages([displayMessage]);
+
+      // Update the conversations list in the UI
+      const updatedStages = [...stagesWithConversations];
+      for (const stage of updatedStages) {
+        for (const assistant of stage.assistants) {
+          if (assistant.id === assistantId) {
+            const newDisplayConversation: DisplayConversation = {
+              id: conversationId,
+              user_id: userId,
+              assistant_id: assistantId,
+              title: 'New Conversation',
+              created_at: new Date(timestamp),
+              last_updated: new Date(timestamp),
+              messages: [displayMessage]
+            };
+            assistant.conversations.unshift(newDisplayConversation);
+          }
+        }
+      }
+      setStagesWithConversations(updatedStages);
+
+    } catch (error) {
+      console.error('Error creating new conversation:', error);
+      // Optionally show an error message to the user
+    }
   };
 
   const toggleSidebar = () => {
@@ -1103,7 +1264,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
                   id: "1",
                   conversation_id: "",
                   content: "Hello! I'm your AI HR assistant. How can I help you today?",
-                  sender: "ai",
+                  sender: "assistant",
                   created_at: new Date().toISOString(),
                   timestamp: new Date(),
                 },
@@ -1168,7 +1329,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
   const mapMessageToDisplay = (message: DBMessage): MessageDisplay => ({
     id: message.id,
     content: message.content,
-    sender: message.sender === 'ai' ? 'assistant' : 'user',
+    sender: message.sender === 'assistant' ? 'assistant' : 'user',
     created_at: new Date(message.created_at),
     is_voice: message.isVoice || false,
     audio_url: message.audio_url
@@ -1614,7 +1775,7 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
           <div className="space-y-4">
             {displayMessages.map((message) => (
               <div key={message.id} className="flex items-start gap-3">
-                {message.sender === "ai" && (
+                {message.sender === "assistant" && (
                   <Avatar className="h-8 w-8">
                     <AvatarImage src={`https://api.dicebear.com/7.x/bottts/svg?seed=${selectedAssistant}`} />
                     <AvatarFallback>
@@ -1634,7 +1795,10 @@ const AIAssistant: FC<ExtendedAIAssistantProps> = ({
                 </div>
                 {message.sender === "user" && (
                   <Avatar className="h-8 w-8">
-                    <AvatarImage src={user?.user_metadata?.avatar_url} />
+                    <AvatarImage 
+                      src={user?.user_metadata?.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.email}`} 
+                      alt={user?.email}
+                    />
                     <AvatarFallback>
                       <User className="h-4 w-4" />
                     </AvatarFallback>

@@ -99,26 +99,16 @@ export const toMessageDisplay = (message: DBMessage): MessageDisplay => ({
 export interface Assistant {
   id: string;
   name: string;
-  description: string;
   mode: string;
-  conversations: Array<{
-    id: string;
-    title: string;
-    lastUpdated: Date;
-    messages: Array<{
-      id: string;
-      content: string;
-      sender: 'user' | 'assistant';
-      timestamp: Date;
-    }>;
-  }>;
-  isActive: boolean;
-  created_at: string;
-  updated_at: string;
+  description: string;
+  icon?: string;
+  systemMessage: string;
+  careerStage?: string;
+  isActive?: boolean;
 }
 
-export interface AssistantWithActive extends Assistant {
-  isActive: boolean;
+export interface AssistantWithConversations extends Assistant {
+  conversations: Conversation[];
 }
 
 export interface Conversation {

@@ -1,17 +1,20 @@
+export interface MessageModeration {
+  flagged: boolean;
+  categories: Record<string, boolean>;
+  scores: Record<string, number>;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
   content: string;
-  sender: 'user' | 'assistant';
+  sender: "assistant" | "user";
   created_at: string;
-  token_count?: number;
+  timestamp: string;
   is_voice?: boolean;
   audio_url?: string;
-  moderation?: {
-    flagged: boolean;
-    categories: Record<string, boolean>;
-    scores: Record<string, number>;
-  };
+  token_count?: number;
+  moderation?: MessageModeration;
 }
 
 // For internal use after fetching from DB
@@ -19,41 +22,58 @@ export interface MessageWithDate {
   id: string;
   conversation_id: string;
   content: string;
-  sender: 'user' | 'assistant';
+  sender: "assistant" | "user";
   created_at: Date;
-  token_count?: number;
+  timestamp: Date;
   is_voice?: boolean;
   audio_url?: string;
-  moderation?: {
-    flagged: boolean;
-    categories: Record<string, boolean>;
-    scores: Record<string, number>;
-  };
+  token_count?: number;
+  moderation?: MessageModeration;
 }
 
-// Simplified version for display purposes
+// For display in the UI
 export interface MessageDisplay {
   id: string;
   content: string;
-  sender: 'user' | 'assistant';
-  timestamp?: Date;  // Added for backward compatibility
-  created_at: Date;
+  sender: "assistant" | "user";
+  timestamp: Date;
   is_voice?: boolean;
   audio_url?: string;
-  token_count?: number;  // Added for existing usage
+  token_count?: number;
+  moderation?: MessageModeration;
 }
 
-// Helper functions to convert between types
-export const toMessageWithDate = (message: Message): MessageWithDate => ({
-  ...message,
-  created_at: new Date(message.created_at)
-});
+// Database message type
+export interface DBMessage extends Message {
+  // Inherits all fields from Message
+  // Can add DB-specific fields here if needed
+}
 
-export const toMessageDisplay = (message: Message | MessageWithDate): MessageDisplay => ({
-  id: message.id,
-  content: message.content,
-  sender: message.sender,
-  created_at: message.created_at instanceof Date ? message.created_at : new Date(message.created_at),
-  is_voice: message.is_voice,
-  audio_url: message.audio_url
-}); 
+// Helper functions
+export function toMessageWithDate(msg: Message): MessageWithDate {
+  return {
+    ...msg,
+    created_at: new Date(msg.created_at),
+    timestamp: new Date(msg.timestamp)
+  };
+}
+
+export function toMessageDisplay(msg: Message | MessageWithDate): MessageDisplay {
+  return {
+    id: msg.id,
+    content: msg.content,
+    sender: msg.sender,
+    timestamp: 'timestamp' in msg && msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp),
+    is_voice: msg.is_voice,
+    audio_url: msg.audio_url,
+    token_count: msg.token_count,
+    moderation: msg.moderation
+  };
+}
+
+export interface VoiceResponse {
+  text: string;
+  audio_url: string;
+  token_count: number;
+  moderation?: MessageModeration;
+} 

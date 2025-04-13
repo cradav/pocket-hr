@@ -1,4 +1,4 @@
-import { MessageDisplay, Message, toMessageDisplay } from './message';
+import { Message, MessageDisplay } from './message';
 
 export interface Conversation {
   id: string;
@@ -19,6 +19,18 @@ export interface ConversationWithDate {
   last_updated: Date;
 }
 
+// For display in the UI
+export interface DisplayConversation {
+  id: string;
+  user_id: string;
+  assistant_id: string;
+  title: string;
+  created_at: Date;
+  last_updated: Date;
+  messages: MessageDisplay[];
+  isActive?: boolean;
+}
+
 // Helper function to convert string dates to Date objects
 export const toConversationWithDate = (conversation: Conversation): ConversationWithDate => ({
   ...conversation,
@@ -26,19 +38,15 @@ export const toConversationWithDate = (conversation: Conversation): Conversation
   last_updated: new Date(conversation.last_updated)
 });
 
-export interface DisplayConversation extends Conversation {
-  isActive: boolean;
-  messages: MessageDisplay[];
-}
+// Helper function to convert to display format
+export const toDisplayConversation = (conversation: Conversation | ConversationWithDate, messages: MessageDisplay[] = [], isActive: boolean = false): DisplayConversation => ({
+  ...conversation,
+  created_at: conversation.created_at instanceof Date ? conversation.created_at : new Date(conversation.created_at),
+  last_updated: conversation.last_updated instanceof Date ? conversation.last_updated : new Date(conversation.last_updated),
+  messages,
+  isActive
+});
 
 export interface DBConversation extends Conversation {
   messages?: Message[];
-}
-
-export function toDisplayConversation(conversation: DBConversation, isActive: boolean = false): DisplayConversation {
-  return {
-    ...conversation,
-    isActive,
-    messages: conversation.messages?.map(toMessageDisplay) || []
-  };
 } 
