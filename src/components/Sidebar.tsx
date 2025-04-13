@@ -162,7 +162,10 @@ const Sidebar: React.FC<SidebarProps> = ({
       className={`${sidebarOpen ? "w-64" : "w-0 -ml-64"} fixed md:static h-full z-50 bg-card border-r transition-all duration-300 flex flex-col`}
     >
       <div className="p-4 border-b flex items-center justify-between">
-        <h1 className="text-xl font-bold">Pocket.HR</h1>
+        <div className="flex items-center gap-2">
+          <img src="/logo.png" alt="Pocket.HR Logo" className="w-8 h-8 object-contain" />
+          <h1 className="text-xl font-bold">Pocket.HR</h1>
+        </div>
         <Button
           variant="ghost"
           size="icon"
