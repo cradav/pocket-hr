@@ -311,6 +311,7 @@ export function useProfile() {
 
       // If no data is returned but also no error, try to fetch the updated profile
       if (!data || data.length === 0) {
+        console.log("No data returned from update, fetching fresh profile data");
         const { data: refreshedData, error: refreshError } = await supabase
           .from("users")
           .select("*")
@@ -322,14 +323,15 @@ export function useProfile() {
           throw refreshError;
         }
 
+        console.log("Successfully fetched refreshed profile data:", refreshedData);
         setProfile(refreshedData);
         return { data: refreshedData, error: null };
       }
 
       // Update the local profile state with the returned data
       const updatedProfile = Array.isArray(data) ? data[0] : data;
+      console.log("Profile update successful, new data:", updatedProfile);
       setProfile(updatedProfile);
-      console.log("Profile updated successfully:", updatedProfile);
       return { data: updatedProfile, error: null };
     } catch (error) {
       console.error("Error updating profile:", error);

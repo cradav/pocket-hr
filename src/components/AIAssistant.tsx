@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, FC, FormEvent, KeyboardEvent, MouseEvent } from "react";
 import { motion } from "framer-motion";
 import {
   Send,
@@ -58,19 +58,25 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-// Import types, data, and utilities from modular files
+// Import types from the correct location
 import {
-  Message,
-  Conversation,
+  DBMessage,
+  DBConversation,
+  ConversationDisplay,
+  toConversationDisplay,
   Assistant,
-  CareerStage,
-  AIAssistantProps,
-} from "./AIAssistant/types";
+  AssistantWithActive
+} from '../types/assistant';
 import { careerStages, initializeCareerStages } from "./AIAssistant/data";
 import { getModeChangeMessage } from "./AIAssistant/utils";
 import { generateOpenAIResponse } from "../services/openaiService";
 import { processVoiceInput } from "../services/voiceService";
 import MessageFormatter from "./AIAssistant/MessageFormatter";
+import { ChatHistory } from './AIAssistant/ChatHistory';
+import { v4 as uuidv4 } from 'uuid';
+import { Message, MessageDisplay, MessageWithDate, toMessageDisplay, toMessageWithDate } from '../types/message';
+import { Conversation, ConversationWithDate, toConversationWithDate } from '../types/conversation';
+import { Assistant as NewAssistant } from '../types/assistant';
 
 interface VoiceResponse {
   audioUrl: string;
@@ -83,15 +89,65 @@ interface VoiceResponse {
   };
 }
 
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabaseClient";
 
-const AIAssistant: React.FC<AIAssistantProps> = ({
-  onRequestHumanSupport = () => { },
-  wordCredits = { remaining: 1000, total: 1000 },
-  onWordUsage = () => { },
-  selectedCareerStage = "excelling",
-  selectedAssistant = "performance-advisor",
-  setSelectedAssistant = () => { },
+interface AIAssistantProps {
+  userId: string;
+  initialStages: any[];
+  onStageChange?: (stage: any) => void;
+  onAssistantChange?: (assistant: any) => void;
+  onConversationChange?: (conversation: DBConversation) => void;
+}
+
+interface ExtendedAIAssistantProps extends AIAssistantProps {
+  onRequestHumanSupport?: () => void;
+  wordCredits?: {
+    remaining: number;
+    total: number;
+  };
+  onWordUsage?: (wordsUsed: number) => void;
+  selectedCareerStage?: string;
+  selectedAssistant?: string;
+  setSelectedAssistant?: (assistantId: string) => void;
+}
+
+interface LocalConversation {
+  id: string;
+  title: string;
+  lastUpdated: Date;
+  messages: MessageDisplay[];
+}
+
+// Define interfaces locally to avoid conflicts
+interface Message {
+  id: string;
+  conversation_id: string;
+  content: string;
+  sender: string;
+  created_at: string;
+  timestamp?: Date;
+  isVoice?: boolean;
+  audio_url?: string;
+  token_count?: number;
+  moderation?: {
+    flagged: boolean;
+    categories?: string[];
+    score?: number;
+  };
+}
+
+const AIAssistant: FC<ExtendedAIAssistantProps> = ({
+  userId,
+  initialStages,
+  onStageChange,
+  onAssistantChange,
+  onConversationChange,
+  onRequestHumanSupport,
+  wordCredits,
+  onWordUsage,
+  selectedCareerStage,
+  selectedAssistant,
+  setSelectedAssistant,
 }) => {
   const [stagesWithConversations, setStagesWithConversations] = useState(
     initializeCareerStages,
@@ -102,24 +158,36 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
   useEffect(() => {
     const getCurrentUser = async () => {
       const { data } = await supabase.auth.getUser();
-      setUser(data.user);
+      if (data?.user) {
+        setUser(data.user);
+      }
     };
 
     getCurrentUser();
   }, []);
-  const [activeConversation, setActiveConversation] =
-    useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<Message[]>([
+  const [activeConversation, setActiveConversation] = useState<DBConversation | null>(null);
+  const [displayConversation, setDisplayConversation] = useState<ConversationDisplay | null>(null);
+  const [messages, setMessages] = useState<DBMessage[]>([
+    {
+      id: "1",
+      conversation_id: "",
+      content: "Hello! I'm your AI HR assistant. How can I help you today?",
+      sender: "assistant",
+      created_at: new Date().toISOString()
+    }
+  ]);
+  const [displayMessages, setDisplayMessages] = useState<MessageDisplay[]>([
     {
       id: "1",
       content: "Hello! I'm your AI HR assistant. How can I help you today?",
-      sender: "ai",
-      timestamp: new Date(),
-    },
+      sender: "assistant",
+      created_at: new Date(),
+      is_voice: false
+    }
   ]);
 
   const [isLoading, setIsLoading] = useState(false);
-
+  const [error, setError] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessingVoice, setIsProcessingVoice] = useState(false);
@@ -134,277 +202,328 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<
     {
-      conversation: Conversation;
-      messages: Message[];
+      conversation: DBConversation;
+      messages: DBMessage[];
       assistant: Assistant;
     }[]
   >([]);
   const [isRenaming, setIsRenaming] = useState(false);
   const [conversationToRename, setConversationToRename] =
-    useState<Conversation | null>(null);
+    useState<DBConversation | null>(null);
   const [newConversationName, setNewConversationName] = useState("");
   const [isMobileFullscreen, setIsMobileFullscreen] = useState(false);
   const chatMainAreaRef = useRef<HTMLDivElement>(null);
 
-  const handleSendMessage = async () => {
-    if (!inputValue.trim() || isRecording || isProcessingVoice) return;
+  // Update display messages whenever messages change
+  useEffect(() => {
+    setDisplayMessages(messages.map(msg => ({
+      id: msg.id,
+      content: msg.content,
+      sender: msg.sender === 'ai' ? 'assistant' : 'user',
+      created_at: new Date(msg.created_at),
+      timestamp: new Date(msg.created_at),
+      is_voice: msg.isVoice || false,
+      audio_url: msg.audio_url,
+      token_count: msg.token_count
+    })));
+  }, [messages]);
 
-    // Add user message
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: inputValue,
-      sender: "user",
-      timestamp: new Date(),
-      token_count: Math.ceil(inputValue.length / 4), // Approximate token count
-      created_at: new Date().toISOString(),
-    };
-
-    const updatedMessages = [...messages, userMessage];
-    setMessages(updatedMessages);
-    setInputValue("");
-    setIsTyping(false);
-
-    // If no active conversation, create one
-    if (!activeConversation) {
-      await createNewConversation(selectedAssistant);
-      return;
+  // Update display conversation whenever active conversation changes
+  useEffect(() => {
+    if (activeConversation) {
+      const displayConv: ConversationDisplay = {
+        id: activeConversation.id,
+        title: activeConversation.title,
+        lastUpdated: new Date(activeConversation.last_updated),
+        last_updated: activeConversation.last_updated,
+        messages: activeConversation.messages?.map(msg => ({
+          id: msg.id,
+          content: msg.content,
+          sender: msg.sender as "ai" | "user",
+          timestamp: new Date(msg.created_at),
+          is_voice: msg.isVoice,
+          audio_url: msg.audio_url,
+          token_count: msg.token_count
+        })) || []
+      };
+      setDisplayConversation(displayConv);
+    } else {
+      setDisplayConversation(null);
     }
+  }, [activeConversation]);
 
-    // Update the active conversation with the new message
-    const updatedStages = [...stagesWithConversations];
-    for (const stage of updatedStages) {
-      for (const assistant of stage.assistants) {
-        if (assistant.id === selectedAssistant) {
-          const conversationIndex = assistant.conversations.findIndex(
-            (conv) => conv.id === activeConversation.id,
-          );
+  // Update conversation loading effect
+  useEffect(() => {
+    const fetchConversations = async () => {
+      // Só busca conversas se tiver um usuário E um assistente selecionado
+      if (!userId || !selectedAssistant) {
+        // Limpa as conversas se não tiver assistente selecionado
+        setStagesWithConversations(prev => {
+          const updated = [...prev];
+          updated.forEach(stage => {
+            stage.assistants.forEach(assistant => {
+              assistant.conversations = [];
+            });
+          });
+          return updated;
+        });
+        return;
+      }
 
-          if (conversationIndex >= 0) {
-            assistant.conversations[conversationIndex].messages =
-              updatedMessages;
-            assistant.conversations[conversationIndex].lastUpdated = new Date();
-            setStagesWithConversations(updatedStages);
+      try {
+        const { data: conversationsData, error: conversationsError } = await supabase
+          .from('conversations')
+          .select(`
+            *,
+            messages (
+              id,
+              content,
+              sender,
+              created_at,
+              is_voice,
+              audio_url,
+              token_count,
+              moderation
+            )
+          `)
+          .eq('user_id', userId)
+          .eq('assistant_id', selectedAssistant)
+          .order('last_updated', { ascending: false });
 
-            // Generate AI response using OpenAI
-            setIsLoading(true);
+        if (conversationsError) throw conversationsError;
 
-            // Find the selected assistant to get the mode
-            let assistantMode = "default";
-            for (const stage of stagesWithConversations) {
-              const assistant = stage.assistants.find(
-                (a) => a.id === selectedAssistant,
-              );
-              if (assistant) {
-                assistantMode = assistant.mode;
-                break;
-              }
+        // Update the conversations in the UI
+        const updatedStages = [...stagesWithConversations];
+        for (const stage of updatedStages) {
+          for (const assistant of stage.assistants) {
+            if (assistant.id === selectedAssistant) {
+              assistant.conversations = conversationsData?.map(conv => ({
+                id: conv.id,
+                title: conv.title,
+                lastUpdated: new Date(conv.last_updated),
+                messages: conv.messages?.map(msg => ({
+                  id: msg.id,
+                  content: msg.content,
+                  sender: msg.sender,
+                  timestamp: new Date(msg.created_at),
+                  is_voice: msg.is_voice || false,
+                  audio_url: msg.audio_url,
+                  token_count: msg.token_count
+                })) || []
+              })) || [];
+            } else {
+              // Limpa as conversas dos outros assistentes
+              assistant.conversations = [];
             }
-
-            // Save the message to Supabase first
-            try {
-              // Check if we need to create a conversation in the database
-              if (
-                activeConversation &&
-                !activeConversation.id.includes("temp-")
-              ) {
-                // Add user message to existing conversation
-                await supabase.from("messages").insert({
-                  conversation_id: activeConversation.id,
-                  content: inputValue,
-                  sender: "user",
-                  created_at: new Date().toISOString(),
-                  token_count: Math.ceil(inputValue.length / 4), // Approximate for user messages
-                });
-
-                // Update conversation last_updated timestamp
-                await supabase
-                  .from("conversations")
-                  .update({ last_updated: new Date().toISOString() })
-                  .eq("id", activeConversation.id);
-              } else {
-                // Create a new conversation in the database
-                const { data: newConversation, error: convError } =
-                  await supabase
-                    .from("conversations")
-                    .insert({
-                      title: `New Conversation ${Date.now()}`,
-                      assistant_id: selectedAssistant,
-                      user_id: user?.id || "anonymous",
-                      last_updated: new Date().toISOString(),
-                    })
-                    .select()
-                    .single();
-
-                if (convError) throw convError;
-
-                // Add user message to the new conversation
-                await supabase.from("messages").insert({
-                  conversation_id: newConversation.id,
-                  content: inputValue,
-                  sender: "user",
-                  created_at: new Date().toISOString(),
-                  token_count: Math.ceil(inputValue.length / 4), // Approximate for user messages
-                });
-
-                // Update the active conversation with the database ID
-                if (activeConversation) {
-                  const updatedStages = [...stagesWithConversations];
-                  for (const stage of updatedStages) {
-                    for (const assistant of stage.assistants) {
-                      if (assistant.id === selectedAssistant) {
-                        const convIndex = assistant.conversations.findIndex(
-                          (conv) => conv.id === activeConversation.id,
-                        );
-
-                        if (convIndex >= 0) {
-                          assistant.conversations[convIndex].id =
-                            newConversation.id;
-                        }
-                      }
-                    }
-                  }
-                  setStagesWithConversations(updatedStages);
-                }
-              }
-            } catch (dbError) {
-              console.error("Error saving message to database:", dbError);
-              // Continue with OpenAI call even if database save fails
-            }
-
-            // Call OpenAI service
-            generateOpenAIResponse(inputValue, assistantMode)
-              .then(async (response) => {
-                const aiResponse: Message = {
-                  id: (Date.now() + 1).toString(),
-                  content: response.content,
-                  sender: "ai",
-                  timestamp: new Date(),
-                  token_count: response.tokenCount,
-                  created_at: new Date().toISOString(),
-                };
-
-                // Calculate words used and update credits if callback provided
-                if (onWordUsage) {
-                  // Rough estimate: 1 token ≈ 0.75 words
-                  const wordsUsed = Math.ceil(response.tokenCount * 0.75);
-                  onWordUsage(wordsUsed);
-
-                  // Update word credits in the database
-                  try {
-                    if (user) {
-                      const { data: userData } = await supabase
-                        .from("users")
-                        .select("word_credits_remaining")
-                        .eq("id", user.id)
-                        .single();
-
-                      if (userData) {
-                        const newRemaining = Math.max(
-                          0,
-                          userData.word_credits_remaining - wordsUsed,
-                        );
-                        await supabase
-                          .from("users")
-                          .update({ word_credits_remaining: newRemaining })
-                          .eq("id", user.id);
-                      }
-                    }
-                  } catch (creditError) {
-                    console.error("Error updating word credits:", creditError);
-                  }
-                }
-
-                const finalMessages = [...updatedMessages, aiResponse];
-                setMessages(finalMessages);
-
-                // Save AI response to database
-                try {
-                  if (
-                    activeConversation &&
-                    !activeConversation.id.includes("temp-")
-                  ) {
-                    await supabase.from("messages").insert({
-                      conversation_id: activeConversation.id,
-                      content: response.content,
-                      sender: "ai",
-                      created_at: new Date().toISOString(),
-                      token_count: response.tokenCount, // Actual token count from OpenAI
-                    });
-                  }
-                } catch (dbError) {
-                  console.error(
-                    "Error saving AI response to database:",
-                    dbError,
-                  );
-                }
-
-                // Update conversation in state
-                const finalStages = [...stagesWithConversations];
-                for (const stage of finalStages) {
-                  for (const assistant of stage.assistants) {
-                    if (assistant.id === selectedAssistant) {
-                      const convIndex = assistant.conversations.findIndex(
-                        (conv) => conv.id === activeConversation.id,
-                      );
-
-                      if (convIndex >= 0) {
-                        assistant.conversations[convIndex].messages =
-                          finalMessages;
-                        assistant.conversations[convIndex].lastUpdated =
-                          new Date();
-                        setStagesWithConversations(finalStages);
-                      }
-                    }
-                  }
-                }
-              })
-              .catch((error) => {
-                console.error("Error generating AI response:", error);
-
-                // Add error message
-                const errorMessage: Message = {
-                  id: (Date.now() + 1).toString(),
-                  content:
-                    "Sorry, I encountered an error while generating a response. Please try again later.",
-                  sender: "ai",
-                  timestamp: new Date(),
-                };
-
-                const finalMessages = [...updatedMessages, errorMessage];
-                setMessages(finalMessages);
-
-                // Update conversation with error message
-                const finalStages = [...stagesWithConversations];
-                for (const stage of finalStages) {
-                  for (const assistant of stage.assistants) {
-                    if (assistant.id === selectedAssistant) {
-                      const convIndex = assistant.conversations.findIndex(
-                        (conv) => conv.id === activeConversation.id,
-                      );
-
-                      if (convIndex >= 0) {
-                        assistant.conversations[convIndex].messages =
-                          finalMessages;
-                        assistant.conversations[convIndex].lastUpdated =
-                          new Date();
-                        setStagesWithConversations(finalStages);
-                      }
-                    }
-                  }
-                }
-              })
-              .finally(() => {
-                setIsLoading(false);
-              });
           }
         }
+
+        setStagesWithConversations(updatedStages);
+
+      } catch (error) {
+        console.error('Error fetching conversations:', error);
       }
+    };
+
+    fetchConversations();
+  }, [userId, selectedAssistant]);
+
+  // Update handleConversationSelect to properly load messages
+  const handleConversationSelect = async (conversationId: string) => {
+    try {
+      // Fetch the selected conversation and its messages
+      const { data: conversationData, error: conversationError } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('id', conversationId)
+        .single();
+
+      if (conversationError) throw conversationError;
+
+      const { data: messagesData, error: messagesError } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', conversationId)
+        .order('created_at', { ascending: true });
+
+      if (messagesError) throw messagesError;
+
+      if (conversationData && messagesData) {
+        const conversation: DBConversation = {
+          ...conversationData,
+          messages: messagesData
+        };
+
+        setActiveConversation(conversation);
+        setMessages(messagesData);
+        
+        // Update display messages
+        setDisplayMessages(messagesData.map(msg => ({
+          id: msg.id,
+          content: msg.content,
+          sender: msg.sender === 'ai' ? 'assistant' : 'user',
+          created_at: new Date(msg.created_at),
+          timestamp: new Date(msg.created_at),
+          is_voice: msg.is_voice || false,
+          audio_url: msg.audio_url,
+          token_count: msg.token_count
+        })));
+
+        onConversationChange?.(conversation);
+      }
+    } catch (error) {
+      console.error('Error loading conversation:', error);
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const updateConversationInList = (
+    conversations: DisplayConversation[],
+    updatedConv: DBConversation
+  ): DisplayConversation[] => {
+    const displayConv = toConversationDisplay(updatedConv);
+    const index = conversations.findIndex(c => c.id === displayConv.id);
+    
+    if (index >= 0) {
+      return [
+        ...conversations.slice(0, index),
+        displayConv,
+        ...conversations.slice(index + 1)
+      ];
+    }
+    return [displayConv, ...conversations];
+  };
+
+  const handleSendMessage = async (e: FormEvent | KeyboardEvent | MouseEvent) => {
+    e.preventDefault();
+    if (!userId || !selectedAssistant || !inputValue.trim()) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      let currentConversation = activeConversation;
+
+      // Create new conversation if needed
+      if (!currentConversation) {
+        const newConversation: Conversation = {
+          id: uuidv4(), // Generate UUID for new conversation
+          user_id: userId,
+          assistant_id: selectedAssistant,
+          title: inputValue.substring(0, 50), // Use first 50 chars as title
+          created_at: new Date().toISOString(),
+          last_updated: new Date().toISOString()
+        };
+
+        const { data: newConv, error: convError } = await supabase
+          .from('conversations')
+          .insert(newConversation)
+          .select()
+          .single();
+
+        if (convError) throw convError;
+        currentConversation = newConv;
+        setActiveConversation(newConv);
+      }
+
+      // Store user message
+      const userMessage = {
+        conversation_id: currentConversation.id,
+        content: inputValue,
+        sender: 'user',
+        created_at: new Date().toISOString()
+      };
+
+      const { data: userMsg, error: msgError } = await supabase
+        .from('messages')
+        .insert(userMessage)
+        .select()
+        .single();
+
+      if (msgError) throw msgError;
+
+      // Update UI state
+      const updatedMessages = [...(messages || []), userMsg];
+      setMessages(updatedMessages);
+      setDisplayMessages(updatedMessages.map(toMessageDisplay));
+      setInputValue('');
+
+      // Generate AI response
+      const response = await generateOpenAIResponse(inputValue, findAssistantById(selectedAssistant)?.mode || 'default');
+      
+      // Store AI message
+      const aiMessage = {
+        conversation_id: currentConversation.id,
+        content: response.content,
+        sender: 'ai',
+        created_at: new Date().toISOString()
+      };
+
+      const { data: aiMsg, error: aiError } = await supabase
+        .from('messages')
+        .insert(aiMessage)
+        .select()
+        .single();
+
+      if (aiError) throw aiError;
+
+      // Update conversation last_updated
+      const { error: updateError } = await supabase
+        .from('conversations')
+        .update({ last_updated: new Date().toISOString() })
+        .eq('id', currentConversation.id);
+
+      if (updateError) throw updateError;
+
+      // Final UI update with AI response
+      const finalMessages = [...updatedMessages, aiMsg];
+      setMessages(finalMessages);
+      setDisplayMessages(finalMessages.map(toMessageDisplay));
+
+      // Update conversations list
+      const updatedStages = [...stagesWithConversations];
+      for (const stage of updatedStages) {
+        for (const assistant of stage.assistants) {
+          if (assistant.id === selectedAssistant) {
+            const existingConvIndex = assistant.conversations.findIndex(c => c.id === currentConversation.id);
+            const updatedConv = {
+              id: currentConversation.id,
+              title: currentConversation.title,
+              lastUpdated: new Date(),
+              messages: finalMessages.map(msg => ({
+                id: msg.id,
+                content: msg.content,
+                sender: msg.sender,
+                timestamp: new Date(msg.created_at)
+              }))
+            };
+
+            if (existingConvIndex >= 0) {
+              assistant.conversations[existingConvIndex] = updatedConv;
+            } else {
+              assistant.conversations.unshift(updatedConv);
+            }
+          }
+        }
+      }
+      setStagesWithConversations(updatedStages);
+
+      // Calculate words used and update credits if callback provided
+      if (onWordUsage) {
+        const wordsUsed = Math.ceil(response.tokenCount * 0.75);
+        onWordUsage(wordsUsed);
+      }
+
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setError('Failed to send message. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e: KeyboardEvent) => {
     if (e.key === "Enter") {
-      handleSendMessage();
+      handleSendMessage(e);
     }
   };
 
@@ -478,12 +597,13 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
     setInputValue("");
 
     // Add a user message placeholder
-    const userMessage: Message = {
+    const userMessage: DBMessage = {
       id: Date.now().toString(),
+      conversation_id: activeConversation?.id || '',
       content: "Processing voice message...",
       sender: "user",
-      timestamp: new Date(),
-      isVoice: true,
+      created_at: new Date().toISOString(),
+      isVoice: true
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -543,12 +663,13 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
       }
 
       // Add AI response
-      const aiResponse: Message = {
+      const aiResponse: DBMessage = {
         id: (Date.now() + 1).toString(),
+        conversation_id: activeConversation?.id || '',
         content: response.text,
         sender: "ai",
-        timestamp: new Date(),
-        audioUrl: response.audioUrl,
+        created_at: new Date().toISOString(),
+        audio_url: response.audioUrl,
         moderation: response.moderation,
       };
 
@@ -574,7 +695,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
 
               if (convIndex >= 0) {
                 assistant.conversations[convIndex].messages = finalMessages;
-                assistant.conversations[convIndex].lastUpdated = new Date();
+                assistant.conversations[convIndex].last_updated = new Date().toISOString();
                 setStagesWithConversations(updatedStages);
               }
             }
@@ -592,12 +713,12 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
       console.error("Error processing voice message:", error);
 
       // Add error message
-      const errorMessage: Message = {
+      const errorMessage: DBMessage = {
         id: (Date.now() + 1).toString(),
-        content:
-          "Sorry, I encountered an error processing your voice message. Let's continue by text.",
+        conversation_id: activeConversation?.id || '',
+        content: "Sorry, I encountered an error processing your voice message. Let's continue by text.",
         sender: "ai",
-        timestamp: new Date(),
+        created_at: new Date().toISOString()
       };
 
       setMessages((prev) => [...prev, errorMessage]);
@@ -666,11 +787,11 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
 
     if (stage) {
 
-      const stageChangeMessage: Message = {
+      const stageChangeMessage: DBMessage = {
         id: Date.now().toString(),
         content: `I'm now focusing on "${stage.name}" stage. You can select a specific assistant for more targeted help.`,
         sender: "ai",
-        timestamp: new Date(),
+        created_at: new Date().toISOString(),
       };
 
       // Replace all messages with just the stage change message
@@ -682,176 +803,143 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
     }
   }, [selectedCareerStage]);
 
-  const handleAssistantChange = (assistantId: string) => {
-    // If clicking the same assistant that's already selected, deselect it to collapse conversations
+  // Find the assistant object to get the mode for the welcome message
+  const findAssistantById = (assistantId: string) => {
+    for (const stage of careerStages) {
+      const assistant = stage.assistants.find(a => a.id === assistantId);
+      if (assistant) return assistant;
+    }
+    return null;
+  };
+
+  const handleAssistantChange = async (assistantId: string) => {
+    // If clicking the same assistant that's already selected, deselect it
     if (selectedAssistant === assistantId) {
       setSelectedAssistant("");
+      setActiveConversation(null);
+      setMessages([]);
       return;
     }
 
-    // Use the prop setter from parent component
+    // Set the selected assistant ID
     setSelectedAssistant(assistantId);
     setActiveConversation(null);
 
-    // Find the selected assistant
-    let selectedAssistantObj: Assistant | undefined;
-    for (const stage of stagesWithConversations) {
-      const assistant = stage.assistants.find((a) => a.id === assistantId);
-      if (assistant) {
-        selectedAssistantObj = assistant;
-        break;
-      }
-    }
-
-    if (selectedAssistantObj) {
-      // Clear previous messages and add a new system message when assistant changes
-      const assistantChangeMessage: Message = {
-        id: Date.now().toString(),
-        content: getModeChangeMessage(selectedAssistantObj.mode),
-        sender: "ai",
-        timestamp: new Date(),
-      };
-
-      // Replace all messages with just the new assistant's welcome message
-      setMessages([assistantChangeMessage]);
-    }
-  };
-
-  const handleConversationSelect = (conversation: Conversation) => {
-    setActiveConversation(conversation);
-    setMessages(conversation.messages);
-    // Clear search when selecting a conversation
-    if (isSearching) {
-      setIsSearching(false);
-      setSearchQuery("");
-      setSearchResults([]);
-    }
-  };
-
-  // Fetch conversations from database
-  useEffect(() => {
-    const fetchConversations = async () => {
-      if (!user || !selectedAssistant) return;
-
-      try {
-        const { data, error } = await supabase
-          .from("conversations")
-          .select(
-            `
+    try {
+      // Fetch conversations for this assistant using the UUID
+      const { data: conversationsData, error: conversationsError } = await supabase
+        .from('conversations')
+        .select(`
+          *,
+          messages (
             id,
-            title,
-            last_updated,
-            messages:messages(
-              id, 
-              content, 
-              sender, 
-              created_at,
-              token_count
-            )
-          `,
+            content,
+            sender,
+            created_at,
+            is_voice,
+            audio_url,
+            token_count,
+            moderation
           )
-          .eq("user_id", user.id)
-          .eq("assistant_id", selectedAssistant)
-          .order("last_updated", { ascending: false });
+        `)
+        .eq('user_id', userId)
+        .eq('assistant_id', assistantId)
+        .order('last_updated', { ascending: false });
 
-        if (error) throw error;
+      if (conversationsError) throw conversationsError;
 
-        if (data && data.length > 0) {
-          // Transform data to match Conversation interface
-          const conversations: Conversation[] = data.map((conv: any) => ({
-            id: conv.id,
-            title: conv.title,
-            lastUpdated: new Date(conv.last_updated),
-            messages: conv.messages.map((msg: any) => ({
-              id: msg.id,
-              content: msg.content,
-              sender: msg.sender as "user" | "ai",
-              timestamp: new Date(msg.created_at),
-              token_count: msg.token_count || 0,
-              created_at: msg.created_at,
-            })),
-          }));
-
-          // Update the stagesWithConversations state
-          const updatedStages = [...stagesWithConversations];
-          for (const stage of updatedStages) {
-            for (const assistant of stage.assistants) {
-              if (assistant.id === selectedAssistant) {
-                assistant.conversations = conversations;
-              }
-            }
-          }
-
-          setStagesWithConversations(updatedStages);
-        }
-      } catch (err) {
-        console.error("Error fetching conversations:", err);
-      }
-    };
-
-    fetchConversations();
-  }, [user, selectedAssistant]);
-
-  const createNewConversation = async (assistantId: string) => {
-    // Find the assistant
-    let stageIndex = -1;
-    let assistantIndex = -1;
-
-    stagesWithConversations.forEach((stage, sIdx) => {
-      stage.assistants.forEach((assistant, aIdx) => {
-        if (assistant.id === assistantId) {
-          stageIndex = sIdx;
-          assistantIndex = aIdx;
-        }
-      });
-    });
-
-    if (stageIndex >= 0 && assistantIndex >= 0) {
-      // Get the current conversations for this assistant to determine the next number
-      const currentConversations =
-        stagesWithConversations[stageIndex].assistants[assistantIndex]
-          .conversations;
-
-      // Find the highest number in existing "New Conversation {n}" titles
-      let highestNumber = 0;
-      currentConversations.forEach((conv) => {
-        const match = conv.title.match(/New Conversation (\d+)/);
-        if (match && match[1]) {
-          const num = parseInt(match[1], 10);
-          if (num > highestNumber) {
-            highestNumber = num;
-          }
-        }
-      });
-
-      // Create new conversation with incremented number
-      const newConversation: Conversation = {
-        id: `${assistantId}-conv-${Date.now()}`,
-        title: `New Conversation ${highestNumber + 1}`,
-        lastUpdated: new Date(),
-        messages: [
-          {
-            id: Date.now().toString(),
-            content: getModeChangeMessage(
-              stagesWithConversations[stageIndex].assistants[assistantIndex]
-                .mode,
-            ),
-            sender: "ai",
-            timestamp: new Date(),
-          },
-        ],
-      };
-
-      // Create a deep copy of the state
+      // Update the conversations in the UI
       const updatedStages = [...stagesWithConversations];
-      updatedStages[stageIndex].assistants[assistantIndex].conversations.push(
-        newConversation,
-      );
+      for (const stage of updatedStages) {
+        for (const assistant of stage.assistants) {
+          if (assistant.id === assistantId) {
+            assistant.conversations = conversationsData?.map(conv => ({
+              id: conv.id,
+              title: conv.title,
+              lastUpdated: new Date(conv.last_updated),
+              messages: conv.messages?.map(msg => ({
+                id: msg.id,
+                content: msg.content,
+                sender: msg.sender,
+                timestamp: new Date(msg.created_at),
+                is_voice: msg.is_voice || false,
+                audio_url: msg.audio_url,
+                token_count: msg.token_count
+              })) || []
+            })) || [];
+          }
+        }
+      }
 
       setStagesWithConversations(updatedStages);
-      setActiveConversation(newConversation);
-      setMessages(newConversation.messages);
+
+      // Find the assistant object to get the mode for the welcome message
+      const assistantObj = findAssistantById(assistantId);
+      const mode = assistantObj?.mode || 'default';
+
+      // Show welcome message for the selected assistant
+      const welcomeMessage: DBMessage = {
+        id: uuidv4(),
+        conversation_id: "",
+        content: getModeChangeMessage(mode),
+        sender: "ai",
+        created_at: new Date().toISOString()
+      };
+
+      setMessages([welcomeMessage]);
+      setDisplayMessages([toMessageDisplay(welcomeMessage)]);
+
+    } catch (error) {
+      console.error('Error loading conversations:', error);
+      // Show error message but keep the assistant selected
+      const errorMessage: DBMessage = {
+        id: uuidv4(),
+        conversation_id: "",
+        content: "Sorry, I encountered an error loading the conversations. You can still start a new chat.",
+        sender: "ai",
+        created_at: new Date().toISOString()
+      };
+      setMessages([errorMessage]);
+      setDisplayMessages([toMessageDisplay(errorMessage)]);
     }
+  };
+
+  const createNewConversation = (assistantId: string) => {
+    const timestamp = new Date();
+    const conversationId = uuidv4();
+    
+    // Find the assistant mode
+    const assistantObj = findAssistantById(assistantId);
+    const mode = assistantObj?.mode || 'default';
+    
+    const newMessage: DBMessage = {
+      id: uuidv4(),
+      conversation_id: conversationId,
+      content: getModeChangeMessage(mode),
+      sender: "ai",
+      created_at: timestamp.toISOString()
+    };
+
+    const newConversation: Conversation = {
+      id: uuidv4(),
+      user_id: userId,
+      assistant_id: assistantId,
+      title: 'New Conversation',
+      created_at: new Date(),
+      last_updated: new Date()
+    };
+
+    // Update state
+    setActiveConversation(newConversation);
+    setMessages([newMessage]);
+    
+    // Update display messages
+    setDisplayMessages([{
+      id: newMessage.id,
+      content: newMessage.content,
+      sender: newMessage.sender,
+      timestamp: new Date(newMessage.created_at)
+    }]);
   };
 
   const toggleSidebar = () => {
@@ -867,8 +955,8 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
 
     setIsSearching(true);
     const results: {
-      conversation: Conversation;
-      messages: Message[];
+      conversation: DBConversation;
+      messages: DBMessage[];
       assistant: Assistant;
     }[] = [];
 
@@ -1006,16 +1094,17 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
           if (assistant.id === assistantId) {
             if (assistant.conversations.length > 0) {
               // Select the first available conversation
-              handleConversationSelect(assistant.conversations[0]);
+              handleConversationSelect(assistant.conversations[0].id);
             } else {
               // No conversations left, clear the active conversation
               setActiveConversation(null);
               setMessages([
                 {
                   id: "1",
-                  content:
-                    "Hello! I'm your AI HR assistant. How can I help you today?",
+                  conversation_id: "",
+                  content: "Hello! I'm your AI HR assistant. How can I help you today?",
                   sender: "ai",
+                  created_at: new Date().toISOString(),
                   timestamp: new Date(),
                 },
               ]);
@@ -1074,6 +1163,103 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
       document.body.style.overflow = "";
     };
   }, []);
+
+  // Update message mapping to ensure all required fields
+  const mapMessageToDisplay = (message: DBMessage): MessageDisplay => ({
+    id: message.id,
+    content: message.content,
+    sender: message.sender === 'ai' ? 'assistant' : 'user',
+    created_at: new Date(message.created_at),
+    is_voice: message.isVoice || false,
+    audio_url: message.audio_url
+  });
+
+  const mapDisplayToMessage = (message: MessageDisplay, conversationId: string): DBMessage => ({
+    id: message.id,
+    conversation_id: conversationId,
+    content: message.content,
+    sender: message.sender,
+    created_at: message.timestamp.toISOString(),
+    timestamp: message.timestamp,
+    isVoice: message.is_voice,
+    audio_url: message.audio_url,
+    token_count: message.token_count,
+    moderation: message.moderation
+  });
+
+  // Update conversation state
+  const updateConversationState = (conversation: ConversationDisplay) => {
+    setDisplayConversation({
+      ...conversation,
+      lastUpdated: new Date(),
+      last_updated: new Date().toISOString(),
+      messages: conversation.messages.map(msg => mapMessageToDisplay({
+        ...msg,
+        conversation_id: conversation.id,
+        created_at: msg.timestamp.toISOString()
+      } as DBMessage))
+    });
+  };
+
+  // Helper function for system prompt
+  const getSystemPromptForMode = (mode: string) => {
+    // Add your system prompt logic here
+    return `You are now in ${mode} mode. How can I help you?`;
+  };
+
+  const handleVoiceResponse = (response: VoiceResponse) => {
+    const moderation = response.moderation ? {
+      flagged: response.moderation.flagged,
+      categories: response.moderation.categories || [],
+      score: response.moderation.score
+    } : undefined;
+
+    const message: DBMessage = {
+      id: uuidv4(),
+      conversation_id: activeConversation.id,
+      content: response.text,
+      sender: 'user',
+      created_at: new Date().toISOString(),
+      timestamp: new Date(),
+      isVoice: true,
+      audio_url: response.audioUrl,
+      token_count: response.tokenCount,
+      moderation
+    };
+
+    // ... existing code ...
+  };
+
+  const getModeChangeMessage = (mode: string) => {
+    switch (mode) {
+      // Landing the role
+      case 'resume':
+        return "I'm now in Resume Coach mode. I can help you create, optimize, and tailor your resume for specific job applications and ATS systems.";
+      case 'negotiation':
+        return "I'm now in Negotiation Advisor mode. I can help you prepare for salary discussions, benefits negotiations, and develop effective negotiation strategies.";
+      case 'interview':
+        return "I'm now in Interview Practice mode. I can help you prepare for interviews with practice questions, feedback, and strategies for different interview types.";
+      
+      // Excel at work
+      case 'performance':
+        return "I'm now in Performance Improvement mode. I can help you enhance your work performance, set goals, and develop strategies for career growth.";
+      case 'onboarding':
+        return "I'm now in Onboarding Assistant mode. I can help you navigate your new role, understand company policies, and integrate effectively into your workplace.";
+      case 'benefits':
+        return "I'm now in Benefits Advisor mode. I can help you understand your workplace benefits, make informed decisions, and optimize your benefits package.";
+      
+      // Moving On
+      case 'transition':
+        return "I'm now in Transition Coach mode. I can help you plan your career transition, identify new opportunities, and develop strategies for professional growth.";
+      case 'reference':
+        return "I'm now in Reference Builder mode. I can help you identify and approach potential references, prepare reference documentation, and manage professional relationships.";
+      case 'exit':
+        return "I'm now in Exit Strategy mode. I can help you plan a professional departure, prepare handover documentation, and maintain positive relationships.";
+      
+      default:
+        return "How can I help you today?";
+    }
+  };
 
   return (
     <div className="flex h-full w-full bg-background flex-col md:flex-row relative">
@@ -1195,7 +1381,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                           <div
                             className="flex items-center p-2 rounded-md cursor-pointer bg-accent"
                             onClick={() =>
-                              handleConversationSelect(result.conversation)
+                              handleConversationSelect(result.conversation.id)
                             }
                           >
                             <Avatar className="h-6 w-6 mr-2">
@@ -1264,10 +1450,10 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                             {stage.assistants.map((assistant) => (
                               <div key={assistant.id} className="space-y-2">
                                 <div
-                                  className={`flex items-center p-2 rounded-md cursor-pointer ${selectedAssistant === assistant.id ? "bg-accent" : "hover:bg-muted"}`}
-                                  onClick={() =>
-                                    handleAssistantChange(assistant.id)
-                                  }
+                                  className={`flex items-center p-2 rounded-md cursor-pointer ${
+                                    selectedAssistant === assistant.id ? "bg-accent" : "hover:bg-muted"
+                                  }`}
+                                  onClick={() => handleAssistantChange(assistant.id)}
                                 >
                                   <Avatar className="h-6 w-6 mr-2">
                                     <AvatarImage
@@ -1277,20 +1463,31 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                                       <Bot className="h-4 w-4" />
                                     </AvatarFallback>
                                   </Avatar>
-                                  <span className="font-medium text-sm">
-                                    {assistant.name}
-                                  </span>
+                                  <div className="flex-1">
+                                    <span className="font-medium text-sm">
+                                      {assistant.name}
+                                    </span>
+                                    <p className="text-xs text-muted-foreground">
+                                      {assistant.description}
+                                    </p>
+                                  </div>
+                                  {selectedAssistant === assistant.id && (
+                                    <ChevronDown className="h-4 w-4" />
+                                  )}
                                 </div>
 
                                 {selectedAssistant === assistant.id && (
-                                  <div className="pl-8 space-y-2">
+                                  <motion.div
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: "auto", opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    className="pl-8 space-y-2"
+                                  >
                                     <Button
                                       variant="ghost"
                                       size="sm"
                                       className="w-full justify-start text-xs gap-1 h-8 px-2"
-                                      onClick={() => {
-                                        createNewConversation(assistant.id);
-                                      }}
+                                      onClick={() => createNewConversation(assistant.id)}
                                     >
                                       <Plus className="h-3 w-3" />
                                       New Conversation
@@ -1298,29 +1495,18 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
 
                                     <Separator className="my-2" />
 
-                                    {assistant.conversations.map(
-                                      (conversation) => (
+                                    {assistant.conversations.length > 0 ? (
+                                      assistant.conversations.map((conversation) => (
                                         <div
                                           key={conversation.id}
-                                          className={`flex items-center justify-between p-1 rounded-md cursor-pointer text-xs ${activeConversation?.id === conversation.id ? "bg-muted" : "hover:bg-muted/50"}`}
+                                          className="flex items-center justify-between p-2 hover:bg-gray-100 cursor-pointer"
+                                          onClick={() => handleConversationSelect(conversation.id)}
                                         >
-                                          <div
-                                            className="flex items-center flex-1 overflow-hidden"
-                                            onClick={() =>
-                                              handleConversationSelect(
-                                                conversation,
-                                              )
-                                            }
-                                          >
-                                            <MessageSquare className="h-3 w-3 mr-2 text-muted-foreground flex-shrink-0" />
-                                            <div className="overflow-hidden">
-                                              <p className="truncate">
-                                                {conversation.title}
-                                              </p>
-                                              <p className="text-xs text-muted-foreground">
-                                                {conversation.lastUpdated.toLocaleDateString()}
-                                              </p>
-                                            </div>
+                                          <div className="flex-1">
+                                            <p className="text-sm font-medium">{conversation.title}</p>
+                                            <p className="text-xs text-gray-500">
+                                              {new Date(conversation.lastUpdated).toLocaleDateString()}
+                                            </p>
                                           </div>
                                           <DropdownMenu>
                                             <DropdownMenuTrigger asChild>
@@ -1328,26 +1514,17 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                                                 variant="ghost"
                                                 size="icon"
                                                 className="h-6 w-6 p-0 ml-1"
-                                                onClick={(e) =>
-                                                  e.stopPropagation()
-                                                }
+                                                onClick={(e) => e.stopPropagation()}
                                               >
                                                 <MoreVertical className="h-3 w-3" />
                                               </Button>
                                             </DropdownMenuTrigger>
-                                            <DropdownMenuContent
-                                              align="end"
-                                              className="w-40"
-                                            >
+                                            <DropdownMenuContent align="end" className="w-40">
                                               <DropdownMenuItem
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  setConversationToRename(
-                                                    conversation,
-                                                  );
-                                                  setNewConversationName(
-                                                    conversation.title,
-                                                  );
+                                                  setConversationToRename(conversation);
+                                                  setNewConversationName(conversation.title);
                                                   setIsRenaming(true);
                                                 }}
                                               >
@@ -1360,7 +1537,7 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                                                   e.stopPropagation();
                                                   handleDeleteConversation(
                                                     assistant.id,
-                                                    conversation.id,
+                                                    conversation.id
                                                   );
                                                 }}
                                               >
@@ -1370,9 +1547,13 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                                             </DropdownMenuContent>
                                           </DropdownMenu>
                                         </div>
-                                      ),
+                                      ))
+                                    ) : (
+                                      <p className="text-xs text-muted-foreground text-center py-2">
+                                        No conversations yet
+                                      </p>
                                     )}
-                                  </div>
+                                  </motion.div>
                                 )}
                               </div>
                             ))}
@@ -1390,28 +1571,17 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
       {/* Main Chat Area */}
       <div
         ref={chatMainAreaRef}
-        className={`flex-1 flex flex-col h-full overflow-hidden ${isMobileFullscreen ? "fixed inset-0 z-[1000] bg-background w-full" : ""}`}
+        className="flex-1 flex flex-col h-full overflow-hidden"
         id="chat-main-area"
       >
-        <div className="p-2 md:p-4 border-b flex justify-between items-center relative">
-          {isMobileFullscreen && (
+        {/* Header */}
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className="flex items-center gap-2">
             <Button
               variant="ghost"
               size="icon"
-              className="absolute right-2 top-2"
-              onClick={disableMobileFullscreen}
-              id="minimize-chat-button"
-              aria-label="Minimize chat"
-            >
-              <X className="h-5 w-5" />
-            </Button>
-          )}
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              size="icon"
+              className="md:hidden"
               onClick={toggleSidebar}
-              className="md:flex"
             >
               {showSidebar ? (
                 <PanelRightClose className="h-5 w-5" />
@@ -1419,350 +1589,115 @@ const AIAssistant: React.FC<AIAssistantProps> = ({
                 <PanelRightOpen className="h-5 w-5" />
               )}
             </Button>
-            <h2 className="text-lg md:text-xl font-semibold ml-2 truncate">
-              AI HR Assistant
+            <h2 className="text-xl font-semibold">
+              {selectedAssistant ? findAssistantById(selectedAssistant)?.name : 'AI HR Assistant'}
             </h2>
           </div>
-
-          <div className="flex items-center">
-            {activeConversation ? (
-              <div className="text-xs md:text-sm font-medium truncate max-w-[150px] md:max-w-[250px]">
-                {getFilteredStages().map((stage) =>
-                  stage.assistants.map((assistant) =>
-                    assistant.conversations.find(
-                      (conv) => conv.id === activeConversation?.id,
-                    ) ? (
-                      <span key={assistant.id}>
-                        {assistant.name} - {activeConversation.title}
-                      </span>
-                    ) : null,
-                  ),
-                )}
-              </div>
-            ) : (
-              <div className="text-xs md:text-sm font-medium truncate max-w-[150px] md:max-w-[250px]">
-                {getFilteredStages().map((stage) =>
-                  stage.assistants.find((a) => a.id === selectedAssistant) ? (
-                    <span key={stage.id}>
-                      {
-                        stage.assistants.find((a) => a.id === selectedAssistant)
-                          ?.name
-                      }
-                    </span>
-                  ) : null,
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Tabs removed as they're redundant with the career stages in the sidebar */}
+          {selectedAssistant && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon">
+                    <HelpCircle className="h-5 w-5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{findAssistantById(selectedAssistant)?.description}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
         </div>
 
         {/* Messages Area */}
-        <ScrollArea className="flex-1 p-2 md:p-4" id="chat-messages-area">
+        <div className="flex-1 p-4 overflow-y-auto">
           <div className="space-y-4">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`flex ${message.sender === "user" ? "flex-row-reverse" : "flex-row"} items-start gap-2 max-w-[90%] md:max-w-[80%]`}
-                >
-                  <Avatar
-                    className={
-                      message.sender === "user" ? "bg-primary" : "bg-secondary"
-                    }
-                  >
-                    {message.sender === "user" ? (
-                      <>
-                        <AvatarImage src="https://api.dicebear.com/7.x/avataaars/svg?seed=user" />
-                        <AvatarFallback>
-                          <User className="h-5 w-5" />
-                        </AvatarFallback>
-                      </>
-                    ) : (
-                      <>
-                        <AvatarImage src="https://api.dicebear.com/7.x/bottts/svg?seed=assistant" />
-                        <AvatarFallback>
-                          <Bot className="h-5 w-5" />
-                        </AvatarFallback>
-                      </>
-                    )}
+            {displayMessages.map((message) => (
+              <div key={message.id} className="flex items-start gap-3">
+                {message.sender === "ai" && (
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={`https://api.dicebear.com/7.x/bottts/svg?seed=${selectedAssistant}`} />
+                    <AvatarFallback>
+                      <Bot className="h-4 w-4" />
+                    </AvatarFallback>
                   </Avatar>
-                  <div
-                    className={`rounded-lg p-2 md:p-3 ${message.sender === "user" ? "bg-primary text-primary-foreground" : "bg-muted"}`}
-                  >
-                    {message.sender === "ai" ? (
-                      <>
-                        <MessageFormatter content={message.content} />
-                        {message.audioUrl && (
-                          <div className="flex items-center mt-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="p-1 h-6"
-                              onClick={() => {
-                                if (audioRef.current) {
-                                  audioRef.current.src = message.audioUrl || "";
-                                  audioRef.current.play();
-                                  setIsPlaying(true);
-                                  setAudioUrl(message.audioUrl || null);
-                                }
-                              }}
-                            >
-                              <Volume2 className="h-3 w-3 mr-1" />
-                              <span className="text-xs">Play audio</span>
-                            </Button>
-                          </div>
-                        )}
-                        {message.moderation?.flagged && (
-                          <div className="flex items-center mt-2 bg-red-50 p-2 rounded text-red-600 text-xs">
-                            <AlertTriangle className="h-3 w-3 mr-1" />
-                            <span>
-                              Content flagged:{" "}
-                              {message.moderation.categories?.join(", ") ||
-                                "Policy violation"}
-                            </span>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-sm md:text-base">
-                          {message.content}
-                        </p>
-                        {message.isVoice && (
-                          <div className="flex items-center mt-1 bg-blue-50 p-1 rounded text-blue-600 text-xs">
-                            <Mic className="h-3 w-3 mr-1" />
-                            <span>Voice message</span>
-                          </div>
-                        )}
-                      </>
-                    )}
-                    <p className="text-xs opacity-70 mt-1">
-                      {message.timestamp.toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </p>
-                  </div>
+                )}
+                <div className={`rounded-lg p-4 ${
+                  message.sender === "user" ? "bg-primary text-primary-foreground ml-auto" : "bg-muted"
+                }`}>
+                  <MessageFormatter content={message.content} />
+                  {message.token_count && (
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      Words used: {Math.ceil(message.token_count * 0.75)}
+                    </div>
+                  )}
                 </div>
+                {message.sender === "user" && (
+                  <Avatar className="h-8 w-8">
+                    <AvatarImage src={user?.user_metadata?.avatar_url} />
+                    <AvatarFallback>
+                      <User className="h-4 w-4" />
+                    </AvatarFallback>
+                  </Avatar>
+                )}
               </div>
             ))}
           </div>
-        </ScrollArea>
+        </div>
 
-        {/* Input Area */}
-        <div className="p-2 md:p-4 border-t">
-          {/* Hidden audio element for playing responses */}
-          <audio
-            ref={audioRef}
-            onEnded={() => setIsPlaying(false)}
-            style={{ display: "none" }}
-          />
-
-          <div className="flex flex-col md:flex-row gap-2">
-            <div className="flex flex-1 gap-2">
+        {/* Input Area with Word Credits */}
+        <div className="p-4 border-t">
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
               <Input
                 value={inputValue}
-                onChange={(e) => {
-                  setInputValue(e.target.value);
-                  // Set typing state when user starts typing
-                  setIsTyping(e.target.value.length > 0);
-                }}
-                onKeyDown={(e) => {
-                  handleKeyPress(e);
-                  // Clear typing state if input is empty after pressing backspace
-                  if (e.key === "Backspace" && inputValue.length <= 1) {
-                    setIsTyping(false);
-                  }
-                }}
-                onFocus={() => {
-                  // Set typing state when input is focused with content
-                  if (inputValue.length > 0) {
-                    setIsTyping(true);
-                  }
-                  // Enable mobile fullscreen mode
-                  enableMobileFullscreen();
-                }}
-                onBlur={() => {
-                  // Keep typing state true only if there's content
-                  setIsTyping(inputValue.length > 0);
-
-                  // Don't disable fullscreen immediately to allow clicking other elements in the chat area
-                  setTimeout(() => {
-                    const activeElement = document.activeElement;
-                    // Only exit fullscreen if focus moved outside the chat area and not to another input in the chat
-                    if (
-                      !activeElement?.closest("#chat-main-area") ||
-                      activeElement?.id === "minimize-chat-button"
-                    ) {
-                      disableMobileFullscreen();
-                    }
-                  }, 100);
-                }}
-                placeholder={
-                  isRecording
-                    ? "Recording voice..."
-                    : isProcessingVoice
-                      ? "Processing voice..."
-                      : "Type your message here..."
-                }
-                className={`flex-1 text-sm md:text-base ${isRecording ? "border-red-400" : isProcessingVoice ? "border-amber-400" : isTyping ? "border-blue-400" : ""}`}
-                disabled={isLoading || isRecording || isProcessingVoice}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyPress}
+                placeholder="Type your message..."
+                className="flex-1"
               />
-
-              <div className="flex gap-1">
-                {audioUrl && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          onClick={toggleAudioPlayback}
-                          disabled={
-                            isLoading || isRecording || isProcessingVoice
-                          }
-                          className="h-10 w-10 md:h-10 md:w-10"
-                          onFocus={enableMobileFullscreen}
-                        >
-                          {isPlaying ? (
-                            <VolumeX className="h-4 w-4" />
-                          ) : (
-                            <Volume2 className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>{isPlaying ? "Stop audio" : "Play last response"}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+              <Button
+                onClick={handleSendMessage}
+                disabled={!inputValue.trim() || isLoading}
+              >
+                Send
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={toggleRecording}
+                disabled={isLoading || isProcessingVoice}
+              >
+                {isRecording ? (
+                  <MicOff className="h-4 w-4 text-red-500" />
+                ) : (
+                  <Mic className="h-4 w-4" />
                 )}
-
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={toggleRecording}
-                        className={
-                          isRecording
-                            ? "bg-red-100 text-red-500 h-10 w-10 md:h-10 md:w-10"
-                            : isTyping || inputValue.trim().length > 0
-                              ? "opacity-50 h-10 w-10 md:h-10 md:w-10"
-                              : "h-10 w-10 md:h-10 md:w-10"
-                        }
-                        disabled={
-                          isLoading ||
-                          isProcessingVoice ||
-                          isTyping ||
-                          inputValue.trim().length > 0
-                        }
-                        onFocus={enableMobileFullscreen}
-                      >
-                        {isRecording ? (
-                          <MicOff className="h-4 w-4" />
-                        ) : (
-                          <Mic className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>
-                        {isRecording
-                          ? "Stop recording"
-                          : "Start voice recording"}
-                      </p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-
+              </Button>
+            </div>
+            
+            {/* Word Credits Display */}
+            {wordCredits && (
+              <div className="flex justify-between items-center text-sm text-muted-foreground">
+                <div>
+                  Word Credits: {wordCredits.remaining}/{wordCredits.total} remaining this month
+                </div>
                 <Button
-                  onClick={handleSendMessage}
-                  disabled={
-                    isLoading ||
-                    isRecording ||
-                    isProcessingVoice ||
-                    (!inputValue.trim() && !isTyping)
-                  }
-                  className="h-10 md:h-10"
-                  onFocus={enableMobileFullscreen}
+                  variant="ghost"
+                  size="sm"
+                  onClick={onRequestHumanSupport}
+                  className="text-xs"
                 >
-                  {isLoading || isProcessingVoice ? (
-                    <>
-                      <span className="animate-spin mr-2">⏳</span>
-                      <span className="hidden md:inline">
-                        {isProcessingVoice ? "Processing..." : "Thinking..."}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-4 w-4 md:mr-2" />
-                      <span className="hidden md:inline">Send</span>
-                    </>
-                  )}
+                  Need human support? →
                 </Button>
               </div>
-            </div>
+            )}
           </div>
-
-          <div className="mt-2 flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-0">
-            <div className="flex flex-col">
-              <p className="text-xs md:text-sm text-muted-foreground">
-                {(() => {
-                  // Find the selected assistant
-                  for (const stage of stagesWithConversations) {
-                    const assistant = stage.assistants.find(
-                      (a) => a.id === selectedAssistant,
-                    );
-                    if (assistant) {
-                      return assistant.description;
-                    }
-                  }
-                  return "Ask me anything about HR or your career";
-                })()}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Word Credits: {wordCredits.remaining}/{wordCredits.total}{" "}
-                remaining this month
-              </p>
-            </div>
-
-            <Button
-              variant="link"
-              onClick={onRequestHumanSupport}
-              className="text-xs md:text-sm px-0 md:px-2"
-            >
-              Need human support?{" "}
-              <ArrowRight className="h-3 w-3 md:h-4 md:w-4 ml-1" />
-            </Button>
-          </div>
+          <audio ref={audioRef} onEnded={() => setIsPlaying(false)} className="hidden" />
         </div>
       </div>
     </div>
   );
 };
-
-// Helper function to get system prompt based on mode
-function getSystemPromptForMode(mode: string): string {
-  switch (mode) {
-    case "resume-coach":
-      return "You are an expert resume coach. Help the user create or optimize their resume for job applications and ATS systems. Provide specific, actionable advice tailored to their industry and experience level.";
-    case "negotiation-advisor":
-      return "You are an expert negotiation advisor. Provide strategic guidance on negotiating job offers, compensation packages, and benefits. Help the user understand their leverage points and how to professionally advocate for themselves.";
-    case "interview-practice":
-      return "You are an expert interview coach. Help the user prepare for job interviews with practice questions, feedback, and strategies tailored to their industry and the specific role they're applying for.";
-    case "performance-advisor":
-      return "You are a performance improvement advisor. Help the user enhance their workplace performance and prepare for reviews. Provide actionable strategies for professional development and career advancement.";
-    case "benefits-advisor":
-      return "You are a benefits advisor. Help the user understand and optimize their employee benefits package. Provide guidance on health insurance, retirement plans, and other workplace benefits.";
-    default:
-      return "You are an AI HR assistant. Provide helpful, professional advice on career and workplace topics. Be concise, specific, and actionable in your responses.";
-  }
-}
 
 export default AIAssistant;

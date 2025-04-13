@@ -26,6 +26,9 @@ import CareerPathways from "./CareerPathways";
 
 const Home = () => {
   const { theme } = useTheme();
+  const { user: authUser } = useAuth();
+  const isAdmin = authUser?.user_metadata?.role === 'admin';
+  
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 768);
   const [wordCredits, setWordCredits] = useState({
@@ -33,68 +36,82 @@ const Home = () => {
     total: 1000,
   });
   const [selectedCareerStage, setSelectedCareerStage] = useState("excelling");
-  const [selectedAssistant, setSelectedAssistant] = useState(
-    "performance-advisor",
-  );
-
-  const { user: authUser } = useAuth();
-  const isAdmin = authUser?.user_metadata?.role === 'admin';
-
-  // Fetch user data from Supabase
+  const [selectedAssistant, setSelectedAssistant] = useState("performance-advisor");
+  
+  // Estado unificado para dados do usuário
   const [userData, setUserData] = useState({
     name: "",
     email: "",
     company: "",
     avatar: "",
+    isLoading: true,
   });
 
+  // Efeito unificado para carregar dados do usuário
   useEffect(() => {
-    const fetchUserData = async () => {
-      if (authUser) {
-        console.log('Fetching data for user:', authUser.id);
-        try {
-          const { data, error } = await supabase
-            .from('users')
-            .select('name, email, company')
-            .eq('id', authUser.id)
-            .single();
+    const loadUserData = async () => {
+      if (!authUser) {
+        setUserData(prev => ({ ...prev, isLoading: false }));
+        return;
+      }
 
-          console.log('Supabase response:', { data, error });
+      try {
+        // Busca dados do usuário apenas uma vez
+        const { data, error } = await supabase
+          .from('users')
+          .select('name, email, company, avatar_url')
+          .eq('id', authUser.id)
+          .single();
 
-          if (error) {
-            console.error('Error fetching user data:', error);
-            return;
-          }
-
-          if (data) {
-            const newUserData = {
-              name: data.name || authUser.email?.split('@')[0] || '',
-              email: data.email || authUser.email || '',
-              company: data.company || 'Not specified',
-              avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.email}`,
-            };
-            console.log('Setting user data:', newUserData);
-            setUserData(newUserData);
-          } else {
-            console.log('No data found, creating fallback user data');
-            // Fallback if no data found
-            setUserData({
-              name: authUser.email?.split('@')[0] || '',
-              email: authUser.email || '',
-              company: 'Not specified',
-              avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser.email}`,
-            });
-          }
-        } catch (error) {
-          console.error('Error:', error);
+        if (error) {
+          console.error('Error fetching user data:', error);
+          // Fallback para dados do auth
+          setUserData({
+            name: authUser.email?.split('@')[0] || '',
+            email: authUser.email || '',
+            company: 'Not specified',
+            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${authUser.email}`,
+            isLoading: false,
+          });
+          return;
         }
-      } else {
-        console.log('No authenticated user found');
+
+        // Se tiver avatar_url, gera URL assinada
+        let avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.email}`;
+        if (data.avatar_url) {
+          const filePath = data.avatar_url.split('phr-bucket/')[1];
+          if (filePath) {
+            try {
+              const { data: { signedUrl } } = await supabase
+                .storage
+                .from('phr-bucket')
+                .createSignedUrl(filePath, 3600);
+              
+              if (signedUrl) {
+                avatarUrl = signedUrl;
+              }
+            } catch (err) {
+              console.error('Error generating signed URL:', err);
+            }
+          }
+        }
+
+        setUserData({
+          name: data.name || authUser.email?.split('@')[0] || '',
+          email: data.email || authUser.email || '',
+          company: data.company || 'Not specified',
+          avatar: avatarUrl,
+          isLoading: false,
+        });
+
+      } catch (error) {
+        console.error('Error:', error);
+        setUserData(prev => ({ ...prev, isLoading: false }));
       }
     };
 
-    fetchUserData();
-  }, [authUser]);
+    loadUserData();
+  }, [authUser?.id]); // Dependência apenas no ID do usuário
 
   // Mock notifications count
   const notificationsCount = 3;
@@ -202,22 +219,38 @@ const Home = () => {
               )}
             </Button>
 
-            <div className="flex items-center space-x-1 md:space-x-2">
-              <Avatar>
-                <AvatarImage src={userData.avatar} alt={userData.name} />
-                <AvatarFallback>
-                  {userData.name
-                    .split(" ")
-                    .map((n) => n[0])
-                    .join("")}
-                </AvatarFallback>
-              </Avatar>
-              <div className="hidden md:block">
-                <p className="text-sm font-medium">{userData.name}</p>
-                <p className="text-xs text-muted-foreground">{userData.company}</p>
-                {isAdmin && <p className="text-xs text-primary">Admin</p>}
+            {/* Mostra loading state enquanto carrega dados do usuário */}
+            {userData.isLoading ? (
+              <div className="animate-pulse flex items-center space-x-2">
+                <div className="h-10 w-10 bg-muted rounded-full"></div>
+                <div className="space-y-2">
+                  <div className="h-4 w-24 bg-muted rounded"></div>
+                  <div className="h-3 w-16 bg-muted rounded"></div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center space-x-1 md:space-x-2">
+                <Avatar>
+                  <AvatarImage 
+                    src={userData.avatar} 
+                    alt={userData.name}
+                    className="object-cover"
+                  />
+                  <AvatarFallback>
+                    {userData.name
+                      .split(" ")
+                      .map((n) => n[0])
+                      .join("")
+                      .toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="hidden md:block">
+                  <p className="text-sm font-medium">{userData.name}</p>
+                  <p className="text-xs text-muted-foreground">{userData.company}</p>
+                  {isAdmin && <p className="text-xs text-primary">Admin</p>}
+                </div>
+              </div>
+            )}
           </div>
         </header>
 
@@ -298,6 +331,7 @@ const Home = () => {
 
           {activeTab === "ai-assistant" && (
             <AIAssistant
+              userId={authUser?.id}
               wordCredits={wordCredits}
               onWordUsage={handleWordUsage}
               selectedCareerStage={selectedCareerStage}

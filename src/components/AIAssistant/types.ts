@@ -1,41 +1,60 @@
 export interface Message {
   id: string;
+  conversation_id: string;
   content: string;
-  sender: "user" | "ai";
-  timestamp: Date;
+  sender: 'ai' | 'user';
   token_count?: number;
-  audioUrl?: string;
+  audio_url?: string;
+  created_at: string;
+  timestamp?: Date;
   isVoice?: boolean;
+}
+
+export interface MessageDisplay {
+  id: string;
+  content: string;
+  sender: 'ai' | 'user';
+  timestamp: Date;
+  isVoice?: boolean;
+  audio_url?: string;
+  token_count?: number;
   moderation?: {
     flagged: boolean;
     categories?: string[];
     score?: number;
   };
-  created_at?: string;
 }
 
 export interface Conversation {
   id: string;
   title: string;
-  messages: Message[];
-  lastUpdated: Date;
+  user_id: string;
+  assistant_id: string;
+  last_updated: string;
+  created_at: string;
+  messages?: Message[];
 }
 
-export interface TrainingDocument {
+export interface ConversationDisplay {
   id: string;
-  name: string;
-  description?: string;
-  fileUrl: string;
-  fileType: string;
-  uploadDate: Date;
-  size: number; // in bytes
+  title: string;
+  last_updated: Date;
+  messages: MessageDisplay[];
 }
 
 export interface SystemPrompt {
   id: string;
   name: string;
   content: string;
-  lastUpdated: Date;
+  updated_at: string;
+}
+
+export interface TrainingDocument {
+  id: string;
+  name: string;
+  content: string;
+  type: string;
+  updated_at: string;
 }
 
 export interface Assistant {
@@ -43,39 +62,30 @@ export interface Assistant {
   name: string;
   description: string;
   mode: string;
-  conversations: Conversation[];
+  conversations: ConversationDisplay[];
   systemPrompt?: SystemPrompt;
   trainingDocuments?: TrainingDocument[];
   isActive: boolean;
-  createdAt: Date;
-  lastUpdated: Date;
-  userDataAccess?: {
-    documents: boolean;
-    profileInfo: boolean;
-    companyData: boolean;
-  };
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CareerStage {
   id: string;
   name: string;
-  description?: string;
+  description: string;
   assistants: Assistant[];
   isActive: boolean;
-  createdAt: Date;
-  lastUpdated: Date;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AIAssistantProps {
-  onRequestHumanSupport?: () => void;
-  wordCredits?: {
-    remaining: number;
-    total: number;
-  };
-  onWordUsage?: (wordsUsed: number) => void;
-  selectedCareerStage?: string;
-  selectedAssistant?: string;
-  setSelectedAssistant?: (assistantId: string) => void;
+  userId: string;
+  initialStages?: CareerStage[];
+  onStageChange?: (stage: CareerStage) => void;
+  onAssistantChange?: (assistant: Assistant) => void;
+  onConversationChange?: (conversation: Conversation) => void;
 }
 
 export interface AssistantFormData {

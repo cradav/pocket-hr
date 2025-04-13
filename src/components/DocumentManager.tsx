@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useSupabase";
+import { useCache } from "@/contexts/CacheContext";
 import DocumentList from "./DocumentManager/DocumentList";
 
 interface Document {
@@ -53,6 +54,19 @@ interface Document {
   fileUrl?: string;
 }
 
+interface DatabaseDocument {
+  id: string;
+  user_id: string;
+  name: string;
+  type: string;
+  size: number;
+  file_url: string;
+  upload_date: string;
+  analysis_status: string;
+  category: string | null;
+  analysis_results: any | null;
+}
+
 // Utility functions for document management
 const documentUtils = {
   // Format file size helper function
@@ -61,6 +75,17 @@ const documentUtils = {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   },
+
+  // Convert database document to UI document
+  convertToUIDocument: (dbDoc: DatabaseDocument): Document => ({
+    id: dbDoc.id,
+    name: dbDoc.name,
+    type: dbDoc.type,
+    uploadDate: new Date(dbDoc.upload_date).toISOString().split("T")[0],
+    size: documentUtils.formatFileSize(dbDoc.size),
+    status: dbDoc.analysis_status as "analyzed" | "pending" | "none",
+    fileUrl: dbDoc.file_url,
+  }),
 
   // Ensure the storage bucket exists
   ensureStorageBucket: async (bucketName: string): Promise<boolean> => {
@@ -400,238 +425,117 @@ const documentUtils = {
       return null;
     }
   },
+
+  // Delete document from database
+  deleteDocument: async (docId: string): Promise<boolean> => {
+    try {
+      const { error } = await supabase
+        .from("documents")
+        .delete()
+        .eq("id", docId);
+
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error("Error deleting document:", err);
+      return false;
+    }
+  },
 };
 
 const DocumentManager = () => {
-  const [activeTab, setActiveTab] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedDocument, setSelectedDocument] = useState<Document | null>(
-    null,
-  );
-  const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [isUploading, setIsUploading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [shouldRefreshDocs, setShouldRefreshDocs] = useState(false);
-  const [editingType, setEditingType] = useState(false);
-  const [newDocType, setNewDocType] = useState("");
-  const [analysisResults, setAnalysisResults] = useState<any>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const { user } = useAuth();
+  const { documents: dbDocuments, refreshDocuments, isLoading, error } = useCache();
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [showAnalysisDialog, setShowAnalysisDialog] = useState(false);
+  const [analysisResults, setAnalysisResults] = useState<any>(null);
+  const [documentType, setDocumentType] = useState<string>("");
+  const [showTypeDialog, setShowTypeDialog] = useState(false);
+  const [filter, setFilter] = useState<"all" | "analyzed" | "pending" | "none">("all");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  // Log authentication state for debugging
-  useEffect(() => {
-    console.log("Authentication state:", {
-      isAuthenticated: !!user,
-      userId: user?.id,
-    });
-  }, [user]);
+  // Convert database documents to UI documents
+  const documents = dbDocuments?.map(doc => documentUtils.convertToUIDocument(doc)) || [];
 
-  // Fetch documents from Supabase with improved error handling
-  useEffect(() => {
-    const fetchDocuments = async () => {
-      if (!user) {
-        setError("Failed to load documents: User not defined.");
-        setIsLoading(false);
-        return;
-      }
+  // Filter documents based on search term and filter
+  const filteredDocuments = documents.filter((doc) => {
+    const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesFilter = filter === "all" || doc.status === filter;
+    return matchesSearch && matchesFilter;
+  });
 
-      try {
-        console.log("Fetching documents for user:", user.id);
-        setIsLoading(true);
-        setError(null);
-
-        const { data, error } = await supabase
-          .from("documents")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("upload_date", { ascending: false });
-
-        if (error) {
-          console.error("Error fetching documents:", error);
-          let errorMessage =
-            "Failed to load documents. Please try again later.";
-
-          // Provide more specific error messages based on error code
-          if (error.code === "PGRST116") {
-            errorMessage =
-              "The documents table doesn't exist. Please contact support.";
-          } else if (error.code === "42501") {
-            errorMessage =
-              "You don't have permission to access these documents.";
-          } else if (error.code === "23505") {
-            errorMessage = "There was a conflict with existing documents.";
-          } else if (error.message) {
-            errorMessage = `Error: ${error.message}`;
-          }
-
-          setError(errorMessage);
-          throw error;
-        }
-
-        console.log("Documents fetched:", data);
-
-        if (data) {
-          const formattedDocs: Document[] = data.map((doc: any) => ({
-            id: doc.id,
-            name: doc.name,
-            type: doc.type,
-            uploadDate: new Date(doc.upload_date).toISOString().split("T")[0],
-            size: documentUtils.formatFileSize(doc.size),
-            status: doc.analysis_status || "none",
-            fileUrl: doc.file_url,
-          }));
-
-          setDocuments(formattedDocs);
-        } else {
-          // Handle case where data is null but no error occurred
-          setDocuments([]);
-        }
-      } catch (err) {
-        console.error("Error fetching documents:", err);
-        // Only set a generic error if one hasn't been set already
-        if (!error) {
-          setError("Failed to load documents. Please try again later.");
-        }
-        // Set empty documents array if fetch fails
-        setDocuments([]);
-      } finally {
-        setIsLoading(false);
-        // Reset refresh flag after documents are loaded
-        if (shouldRefreshDocs) {
-          setShouldRefreshDocs(false);
-        }
-      }
-    };
-
-    fetchDocuments();
-  }, [user, shouldRefreshDocs]);
-
-  // Handle file upload with improved error handling
-  const handleFileUpload = async (file: File, name: string, type: string) => {
-    if (!user) {
-      console.error("User authentication missing", { user });
-      throw new Error(
-        "You must be logged in to upload files. Please refresh the page or log in again.",
-      );
-    }
-
-    if (!file) {
-      console.error("File missing in upload handler");
-      throw new Error(
-        "No file was provided for upload. Please select a file and try again.",
-      );
-    }
-
-    // Validate file size
-    const maxSizeBytes = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSizeBytes) {
-      throw new Error(
-        `File size exceeds the maximum limit of 10MB. Current size: ${(file.size / (1024 * 1024)).toFixed(2)}MB`,
-      );
-    }
-
-    // Validate file type
-    const allowedTypes = [".pdf", ".docx", ".doc", ".jpg", ".jpeg", ".png"];
-    const fileExtension = file.name
-      .substring(file.name.lastIndexOf("."))
-      .toLowerCase();
-    if (!allowedTypes.includes(fileExtension)) {
-      throw new Error(
-        `File type ${fileExtension} is not supported. Allowed types: ${allowedTypes.join(", ")}`,
-      );
-    }
+  // Handle file upload
+  const handleFileUpload = async (file: File) => {
+    if (!user) return;
 
     try {
       setIsUploading(true);
       setUploadProgress(0);
-      setUploadError(null);
-      console.log(
-        `Starting upload for file: ${file.name}, size: ${file.size} bytes`,
-      );
 
       // Upload file to storage
-      const {
-        success,
-        fileUrl,
-        error: uploadError,
-      } = await documentUtils.uploadFile(file, user.id, setUploadProgress);
+      const { success, fileUrl, error: uploadError } = await documentUtils.uploadFile(
+        file,
+        user.id,
+        (progress) => setUploadProgress(progress)
+      );
 
       if (!success || !fileUrl) {
-        console.error("Upload failed:", uploadError);
-        const errorMessage =
-          uploadError instanceof Error
-            ? uploadError.message
-            : typeof uploadError === "object" && uploadError !== null
-              ? JSON.stringify(uploadError)
-              : "Upload failed: Could not store file";
-        throw new Error(errorMessage);
+        throw uploadError || new Error("Failed to upload file");
       }
 
-      console.log("File uploaded successfully to storage, URL:", fileUrl);
-
-      // Create document record in the database
-      const {
-        success: recordSuccess,
-        document: docRecord,
-        error: recordError,
-      } = await documentUtils.createDocumentRecord(
-        user.id,
-        name || file.name,
-        type,
-        file.size,
-        fileUrl,
-      );
+      // Create document record
+      const { success: recordSuccess, document, error: recordError } = 
+        await documentUtils.createDocumentRecord(
+          user.id,
+          file.name,
+          file.type,
+          file.size,
+          fileUrl
+        );
 
       if (!recordSuccess) {
-        console.error("Failed to create document record:", recordError);
-        const errorMessage =
-          recordError instanceof Error
-            ? recordError.message
-            : typeof recordError === "object" && recordError !== null
-              ? JSON.stringify(recordError)
-              : "Failed to create document record in database";
-        throw new Error(errorMessage);
+        throw recordError || new Error("Failed to create document record");
       }
 
-      console.log("Document record created in database:", docRecord);
-
-      // Add the new document to the state
-      const newDoc: Document = {
-        id: docRecord.id,
-        name: docRecord.name,
-        type: docRecord.type,
-        uploadDate: new Date(docRecord.upload_date).toISOString().split("T")[0],
-        size: documentUtils.formatFileSize(docRecord.size),
-        status: "none",
-        fileUrl: docRecord.file_url,
-      };
-
-      setDocuments((prevDocs) => [newDoc, ...prevDocs]);
-      console.log("Document added to UI state");
-
-      // Signal that documents should be refreshed
-      setShouldRefreshDocs(true);
-
-      return newDoc;
+      // Refresh the documents cache
+      await refreshDocuments();
     } catch (err) {
       console.error("Error uploading document:", err);
-      // Set the error message for display in the UI
-      setUploadError(
-        err instanceof Error
-          ? err.message
-          : "An unexpected error occurred during upload",
-      );
-      throw err;
+      alert(err instanceof Error ? err.message : "Failed to upload document");
     } finally {
       setIsUploading(false);
-      setUploadProgress(100);
-      console.log("Upload process completed");
+      setUploadProgress(0);
+      setSelectedFile(null);
     }
+  };
+
+  // Handle document deletion
+  const handleDocumentDelete = async (docId: string) => {
+    try {
+      const success = await documentUtils.deleteDocument(docId);
+      if (success) {
+        await refreshDocuments();
+        if (selectedDocument?.id === docId) {
+          setSelectedDocument(null);
+        }
+      }
+    } catch (err) {
+      console.error("Error deleting document:", err);
+      alert("Failed to delete document");
+    }
+  };
+
+  // Handle document click
+  const handleDocumentClick = (doc: Document) => {
+    setSelectedDocument(doc);
+  };
+
+  // Handle file selection
+  const handleFileSelect = (file: File) => {
+    setSelectedFile(file);
   };
 
   // Save document type changes
@@ -642,7 +546,7 @@ const DocumentManager = () => {
       // Update document type in the database
       const { error } = await supabase
         .from("documents")
-        .update({ type: newDocType })
+        .update({ type: documentType })
         .eq("id", selectedDocument.id);
 
       if (error) throw error;
@@ -650,13 +554,13 @@ const DocumentManager = () => {
       // Update local state
       setDocuments(
         documents.map((doc) =>
-          doc.id === selectedDocument.id ? { ...doc, type: newDocType } : doc,
+          doc.id === selectedDocument.id ? { ...doc, type: documentType } : doc,
         ),
       );
 
       // Update selected document
-      setSelectedDocument({ ...selectedDocument, type: newDocType });
-      setEditingType(false);
+      setSelectedDocument({ ...selectedDocument, type: documentType });
+      setShowTypeDialog(false);
     } catch (err) {
       console.error("Error updating document type:", err);
       alert("Failed to update document type. Please try again.");
@@ -668,8 +572,6 @@ const DocumentManager = () => {
     if (!user) return;
 
     try {
-      setIsAnalyzing(true);
-
       // Update document status to pending
       const { error } = await supabase
         .from("documents")
@@ -718,17 +620,16 @@ const DocumentManager = () => {
             setSelectedDocument({ ...selectedDocument, status: "analyzed" });
           }
 
-          setIsAnalyzing(false);
           setShowAnalysisDialog(true);
         } catch (err) {
           console.error("Error completing document analysis:", err);
-          setIsAnalyzing(false);
+          setShowAnalysisDialog(false);
         }
       }, 3000); // Simulate 3 second analysis time
     } catch (err) {
       console.error("Error requesting document analysis:", err);
       alert("Failed to request document analysis. Please try again.");
-      setIsAnalyzing(false);
+      setShowAnalysisDialog(false);
     }
   };
 
@@ -989,28 +890,6 @@ const DocumentManager = () => {
     }
   };
 
-  const filteredDocuments = documents.filter((doc) => {
-    // Filter by search query
-    const matchesSearch = searchQuery
-      ? doc.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        doc.type.toLowerCase().includes(searchQuery.toLowerCase())
-      : true;
-
-    // Filter by tab
-    if (activeTab === "all") return matchesSearch;
-    if (activeTab === "contracts")
-      return matchesSearch && doc.type === "Contract";
-    if (activeTab === "reviews") return matchesSearch && doc.type === "Review";
-    if (activeTab === "analyzed")
-      return matchesSearch && doc.status === "analyzed";
-
-    return matchesSearch;
-  });
-
-  const handleDocumentClick = (doc: Document) => {
-    setSelectedDocument(doc);
-  };
-
   const handleAnalyzeRequest = () => {
     if (selectedDocument) {
       if (
@@ -1027,7 +906,7 @@ const DocumentManager = () => {
   };
 
   return (
-    <div className="bg-background w-full h-full p-6">
+    <div className="container mx-auto p-4">
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-2xl font-bold">Document Manager</h1>
@@ -1063,26 +942,10 @@ const DocumentManager = () => {
                       const file = e.target.files?.[0];
                       if (file) {
                         try {
-                          setSelectedFile(file);
-
-                          // Update the dialog button to say "Upload File"
-                          const dialogFooter = document.querySelector(
-                            '[role="dialog"] [data-dialog-footer]',
-                          );
-                          if (dialogFooter) {
-                            const uploadButton =
-                              dialogFooter.querySelector("button:last-child");
-                            if (uploadButton) {
-                              uploadButton.textContent = "Upload File";
-                              uploadButton.setAttribute(
-                                "data-upload-button",
-                                "true",
-                              );
-                            }
-                          }
+                          await handleFileUpload(file);
                         } catch (err) {
                           console.error("File selection error:", err);
-                          setUploadError(
+                          alert(
                             "Failed to select file. Please try again.",
                           );
                         }
@@ -1090,7 +953,7 @@ const DocumentManager = () => {
                     }}
                   />
 
-                  {!selectedFile ? (
+                  {!selectedDocument && (
                     <label
                       htmlFor="file-upload"
                       className="border-2 border-dashed rounded-lg p-12 text-center cursor-pointer hover:bg-muted/50 transition-colors flex flex-col items-center justify-center"
@@ -1105,41 +968,6 @@ const DocumentManager = () => {
                         </p>
                       </div>
                     </label>
-                  ) : (
-                    <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                      <div className="flex flex-col items-center gap-2">
-                        <div className="bg-green-100 text-green-800 p-2 rounded-full">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            width="24"
-                            height="24"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="h-6 w-6"
-                          >
-                            <polyline points="20 6 9 17 4 12"></polyline>
-                          </svg>
-                        </div>
-                        <p className="font-medium">{selectedFile.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {(selectedFile.size / 1024).toFixed(1)} KB
-                        </p>
-                        <Button
-                          variant="link"
-                          className="text-sm mt-2"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            document.getElementById("file-upload")?.click();
-                          }}
-                        >
-                          Change file
-                        </Button>
-                      </div>
-                    </div>
                   )}
                 </div>
 
@@ -1153,13 +981,6 @@ const DocumentManager = () => {
                       ></div>
                     </div>
                     <p className="text-sm mt-2">{uploadProgress}% Uploaded</p>
-                  </div>
-                )}
-
-                {/* Error Message */}
-                {uploadError && (
-                  <div className="bg-red-50 border-l-4 border-red-400 p-3 rounded-md">
-                    <p className="text-sm text-red-700">{uploadError}</p>
                   </div>
                 )}
               </div>
@@ -1177,8 +998,7 @@ const DocumentManager = () => {
                 variant="outline"
                 onClick={() => {
                   // Reset state when canceling
-                  setSelectedFile(null);
-                  setUploadError(null);
+                  setSelectedDocument(null);
                   setUploadProgress(0);
                   setIsUploading(false);
 
@@ -1200,7 +1020,7 @@ const DocumentManager = () => {
                   e.preventDefault();
 
                   // If no file is selected, open file browser
-                  if (!selectedFile) {
+                  if (!selectedDocument) {
                     document.getElementById("file-upload")?.click();
                     return;
                   }
@@ -1214,20 +1034,8 @@ const DocumentManager = () => {
                       );
                     }
 
-                    setUploadError(null);
                     setIsUploading(true);
                     setUploadProgress(0);
-
-                    // Determine file type based on extension
-                    const fileType = selectedFile.name.endsWith(".pdf")
-                      ? "Contract"
-                      : selectedFile.name.endsWith(".docx") ||
-                          selectedFile.name.endsWith(".doc")
-                        ? "Review"
-                        : selectedFile.name.toLowerCase().includes("resume") ||
-                            selectedFile.name.toLowerCase().includes("cv")
-                          ? "Resume"
-                          : "Document";
 
                     // Start the upload with progress tracking
                     const uploadProgressInterval = setInterval(() => {
@@ -1237,11 +1045,7 @@ const DocumentManager = () => {
                       });
                     }, 300);
 
-                    const newDoc = await handleFileUpload(
-                      selectedFile,
-                      selectedFile.name,
-                      fileType,
-                    );
+                    await handleFileUpload(selectedDocument);
 
                     // Clear the interval and set to 100%
                     clearInterval(uploadProgressInterval);
@@ -1249,25 +1053,12 @@ const DocumentManager = () => {
 
                     // Reset state and close dialog after successful upload
                     setTimeout(() => {
-                      setSelectedFile(null);
+                      setSelectedDocument(null);
                       setIsUploading(false);
-
-                      // Trigger document list refresh
-                      setShouldRefreshDocs(true);
-
-                      // Close dialog automatically on success
-                      const closeButton = document
-                        .querySelector('[role="dialog"]')
-                        ?.querySelector(
-                          'button[aria-label="Close"]',
-                        ) as HTMLElement;
-                      if (closeButton) {
-                        closeButton.click();
-                      }
                     }, 500);
                   } catch (err) {
                     console.error("Upload error:", err);
-                    setUploadError(
+                    alert(
                       err instanceof Error
                         ? err.message
                         : "Upload failed. Please try again.",
@@ -1278,7 +1069,7 @@ const DocumentManager = () => {
                   }
                 }}
               >
-                {selectedFile ? "Upload File" : "Select File"}
+                {selectedDocument ? "Upload File" : "Select File"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1298,8 +1089,8 @@ const DocumentManager = () => {
                       type="search"
                       placeholder="Search documents..."
                       className="pl-8 w-[250px]"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
                   <Button variant="outline" size="icon">
@@ -1310,7 +1101,7 @@ const DocumentManager = () => {
               <Tabs
                 defaultValue="all"
                 className="w-full"
-                onValueChange={setActiveTab}
+                onValueChange={(value) => setFilter(value as "all" | "analyzed" | "pending" | "none")}
               >
                 <TabsList className="grid grid-cols-4 w-full max-w-md">
                   <TabsTrigger value="all">All</TabsTrigger>
@@ -1323,17 +1114,12 @@ const DocumentManager = () => {
             <CardContent>
               <DocumentList
                 documents={filteredDocuments}
+                onDocumentClick={handleDocumentClick}
+                onAnalyzeClick={handleAnalyzeRequest}
                 isLoading={isLoading}
                 error={error}
-                onDocumentClick={handleDocumentClick}
                 documentUtils={documentUtils}
-                onDocumentDelete={(docId) => {
-                  // Update local state
-                  setDocuments(documents.filter((d) => d.id !== docId));
-                  if (selectedDocument?.id === docId) {
-                    setSelectedDocument(null);
-                  }
-                }}
+                onDocumentDelete={handleDocumentDelete}
               />
             </CardContent>
           </Card>
@@ -1362,11 +1148,11 @@ const DocumentManager = () => {
                       <span className="text-sm text-muted-foreground">
                         Type:
                       </span>
-                      {editingType ? (
+                      {showTypeDialog ? (
                         <div className="flex items-center gap-2">
                           <Select
-                            value={newDocType}
-                            onValueChange={setNewDocType}
+                            value={documentType}
+                            onValueChange={(value) => setDocumentType(value)}
                           >
                             <SelectTrigger className="w-[140px] h-8">
                               <SelectValue placeholder="Select type" />
@@ -1390,7 +1176,7 @@ const DocumentManager = () => {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => setEditingType(false)}
+                            onClick={() => setShowTypeDialog(false)}
                           >
                             <X className="h-4 w-4" />
                           </Button>
@@ -1405,8 +1191,8 @@ const DocumentManager = () => {
                             size="icon"
                             className="h-6 w-6"
                             onClick={() => {
-                              setNewDocType(selectedDocument.type);
-                              setEditingType(true);
+                              setDocumentType(selectedDocument.type);
+                              setShowTypeDialog(true);
                             }}
                           >
                             <Edit className="h-3 w-3" />
@@ -1459,19 +1245,9 @@ const DocumentManager = () => {
                       <Button
                         className="w-full gap-2"
                         onClick={handleAnalyzeRequest}
-                        disabled={isAnalyzing}
                       >
-                        {isAnalyzing ? (
-                          <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                            Analyzing...
-                          </>
-                        ) : (
-                          <>
-                            <BarChart className="h-4 w-4" />
-                            Analyze Document
-                          </>
-                        )}
+                        <BarChart className="h-4 w-4" />
+                        Analyze Document
                       </Button>
                     </div>
                   )}
@@ -1595,12 +1371,7 @@ const DocumentManager = () => {
               AI-powered analysis of {selectedDocument?.name}
             </DialogDescription>
           </DialogHeader>
-          {isAnalyzing ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
-              <p className="text-muted-foreground">Analyzing document...</p>
-            </div>
-          ) : analysisResults ? (
+          {analysisResults ? (
             <div className="space-y-4 py-4">
               <div className="bg-muted p-4 rounded-md">
                 <h3 className="font-medium mb-2">Key Information</h3>

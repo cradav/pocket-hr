@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useAuth, useProfile } from "@/hooks/useSupabase";
+import { useAuth, useProfile, useSupabase } from "@/hooks/useSupabase";
 import { Badge } from "@/components/ui/badge";
 import {
   Crown,
@@ -24,6 +24,7 @@ import {
   CreditCard,
   Save,
   AlertCircle,
+  Upload,
 } from "lucide-react";
 import { loadStripe } from "@stripe/stripe-js";
 import {
@@ -157,6 +158,7 @@ const PaymentForm = () => {
 };
 
 const AccountSettings = () => {
+  const { supabase } = useSupabase();
   const { user } = useAuth();
   const {
     profile,
@@ -175,6 +177,7 @@ const AccountSettings = () => {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string>("");
 
   // Notification preferences
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -190,13 +193,40 @@ const AccountSettings = () => {
 
   useEffect(() => {
     if (user && profile) {
+      console.log('Loading profile data:', profile); // Debug log
       setFormData({
-        name: profile.full_name || user.user_metadata?.name || "",
+        name: profile.name || "",
         email: user.email || "",
         phone: profile.phone || "",
         company: profile.company || "",
-        jobTitle: profile.job_title || "",
+        jobTitle: profile.title || "",
       });
+
+      // Set avatar URL
+      if (profile.avatar_url) {
+        // Extract the file path from the full URL if it exists
+        const filePath = profile.avatar_url.split('phr-bucket/')[1];
+        if (filePath) {
+          supabase.storage
+            .from('phr-bucket')
+            .createSignedUrl(filePath, 3600) // 1 hour expiry
+            .then(({ data: { signedUrl } }) => {
+              if (signedUrl) {
+                setAvatarUrl(signedUrl);
+              } else {
+                setAvatarUrl(`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`);
+              }
+            })
+            .catch((err) => {
+              console.error('Error generating signed URL:', err);
+              setAvatarUrl(`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`);
+            });
+        } else {
+          setAvatarUrl(`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`);
+        }
+      } else {
+        setAvatarUrl(`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email}`);
+      }
 
       // In a real app, these would come from the user's saved preferences
       setEmailNotifications(profile.email_notifications !== false);
@@ -253,10 +283,10 @@ const AccountSettings = () => {
     try {
       // Create a properly formatted update object
       const updateData = {
-        full_name: formData.name,
+        name: formData.name,
         phone: formData.phone,
         company: formData.company,
-        job_title: formData.jobTitle,
+        title: formData.jobTitle,
         // In a real app, you might update email through auth service instead
       };
 
@@ -339,6 +369,57 @@ const AccountSettings = () => {
 
   const isPremium = profile?.plan_type === "premium";
 
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    try {
+      // Start upload feedback
+      setIsSaving(true);
+
+      // Upload file to Supabase storage in phr-bucket/avatars folder
+      const fileExt = file.name.split('.').pop();
+      const fileName = `avatars/${user.id}-${Math.random()}.${fileExt}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('phr-bucket')
+        .upload(fileName, file);
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('phr-bucket')
+        .getPublicUrl(fileName);
+
+      // Update user profile with new avatar URL
+      const result = await updateProfile({
+        avatar_url: publicUrl
+      });
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      // Get signed URL for immediate display
+      const { data: { signedUrl } } = await supabase.storage
+        .from('phr-bucket')
+        .createSignedUrl(fileName, 3600); // 1 hour expiry
+
+      if (signedUrl) {
+        setAvatarUrl(signedUrl);
+      }
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="w-full h-full bg-background p-6">
       <div className="max-w-4xl mx-auto">
@@ -381,15 +462,37 @@ const AccountSettings = () => {
                   <div className="flex flex-col items-center space-y-3">
                     <Avatar className="h-24 w-24">
                       <AvatarImage
-                        src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user?.id || "default"}`}
+                        src={avatarUrl}
+                        alt="Profile Avatar"
                       />
                       <AvatarFallback>
                         {formData.name.substring(0, 2).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
-                    <Button variant="outline" size="sm">
-                      Change Avatar
-                    </Button>
+                    <div className="flex flex-col items-center gap-2">
+                      <input
+                        id="avatar-upload"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleAvatarChange}
+                        disabled={!isEditing}
+                      />
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        disabled={!isEditing}
+                        onClick={() => document.getElementById('avatar-upload')?.click()}
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        Change Avatar
+                      </Button>
+                      {isSaving && (
+                        <span className="text-sm text-muted-foreground">
+                          Uploading...
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="flex-1 space-y-4">
